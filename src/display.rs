@@ -1,0 +1,428 @@
+use anyhow::{Result, bail};
+use arrow::array::*;
+use arrow::datatypes::DataType;
+use arrow_array::{ArrayRef, RecordBatch};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::text::Span;
+use ratatui::{
+    Frame, Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Paragraph, Row, Table},
+};
+use std::io;
+
+// === Public entry point =====================================================
+
+/// Launch an interactive spreadsheet-like TUI for a Lance `RecordBatch`.
+///
+/// # Arguments
+/// * `batch` - Arrow `RecordBatch` containing a header row with metadata
+///   (`name_id`, `n_rows`, `n_cols`) and feature columns named `col_*`.
+///
+/// The function:
+/// - scans the schema once to find all feature columns (`col_*`),
+/// - opens a ratatui / crossterm alternate screen,
+/// - lets the user scroll horizontally over feature columns,
+/// - and exits when the user presses `q` or `Esc`.
+pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
+    let num_rows = batch.num_rows();
+    let num_cols = batch.num_columns();
+
+    if num_cols == 0 {
+        println!("No columns to display");
+        return Ok(());
+    }
+
+    let all_col_indices = collect_feature_cols(batch)?;
+
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut col_offset: usize = 0;
+    let visible_cols: usize = 8;
+
+    loop {
+        terminal.draw(|f| {
+            render_ui(
+                f,
+                batch,
+                &all_col_indices,
+                col_offset,
+                visible_cols,
+                num_rows,
+                num_cols,
+            );
+        })?;
+
+        let max_offset = all_col_indices.len().saturating_sub(visible_cols);
+        if col_offset > max_offset {
+            col_offset = max_offset;
+        }
+
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+                match code {
+                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        if col_offset < max_offset {
+                            col_offset += 1;
+                        }
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        if col_offset > 0 {
+                            col_offset -= 1;
+                        }
+                    }
+                    KeyCode::Char('H') => col_offset = 0,
+                    KeyCode::Char('E') => col_offset = max_offset,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    Ok(())
+}
+
+// === Formatting helpers =====================================================
+
+/// Format a single value from an Arrow array at the given row index as a string.
+///
+/// # Arguments
+/// * `array` - Arrow `ArrayRef` representing one column.
+/// * `row_idx` - Zero-based row index to read from `array`.
+///
+/// The function:
+/// - handles basic numeric, boolean, and UTF-8 string types,
+/// - returns `"NULL"` for null entries,
+/// - truncates long UTF-8 strings to 10 characters with an ellipsis.
+fn format_value(array: &ArrayRef, row_idx: usize) -> String {
+    if array.is_null(row_idx) {
+        return "NULL".to_string();
+    }
+
+    match array.data_type() {
+        DataType::Float32 => {
+            let arr = array.as_any().downcast_ref::<Float32Array>().unwrap();
+            format!("{:.4}", arr.value(row_idx))
+        }
+        DataType::Float64 => {
+            let arr = array.as_any().downcast_ref::<Float64Array>().unwrap();
+            format!("{:.4}", arr.value(row_idx))
+        }
+        DataType::Int32 => {
+            let arr = array.as_any().downcast_ref::<Int32Array>().unwrap();
+            format!("{}", arr.value(row_idx))
+        }
+        DataType::Int64 => {
+            let arr = array.as_any().downcast_ref::<Int64Array>().unwrap();
+            format!("{}", arr.value(row_idx))
+        }
+        DataType::UInt32 => {
+            let arr = array.as_any().downcast_ref::<UInt32Array>().unwrap();
+            format!("{}", arr.value(row_idx))
+        }
+        DataType::UInt64 => {
+            let arr = array.as_any().downcast_ref::<UInt64Array>().unwrap();
+            format!("{}", arr.value(row_idx))
+        }
+        DataType::Boolean => {
+            let arr = array.as_any().downcast_ref::<BooleanArray>().unwrap();
+            if arr.value(row_idx) { "true" } else { "false" }.to_string()
+        }
+        DataType::Utf8 => {
+            let arr = array.as_any().downcast_ref::<StringArray>().unwrap();
+            let s = arr.value(row_idx);
+            if s.len() > 10 {
+                format!("{}…", &s[0..9])
+            } else {
+                s.to_string()
+            }
+        }
+        _ => "?".to_string(),
+    }
+}
+
+// === Column selection / windows ============================================
+
+/// Collect the indices of all feature columns whose names start with `col_`.
+///
+/// # Arguments
+/// * `batch` - Arrow `RecordBatch` whose schema is inspected.
+///
+/// # Returns
+/// A vector of column indices in schema order corresponding to `col_*` fields.
+///
+/// # Errors
+/// Returns an error if no columns with the `col_` prefix are found, as the
+/// viewer expects a wide columnar schema with `col_*` feature columns.
+fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
+    let schema = batch.schema();
+    let cols: Vec<usize> = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            if f.name().starts_with("col_") {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if cols.is_empty() {
+        bail!("The file should be formatted with col_* using wide columnar schema");
+    }
+    Ok(cols)
+}
+
+/// Compute a sliding window over the feature column indices for horizontal scrolling.
+///
+/// # Arguments
+/// * `all_cols` - Slice of all `col_*` indices in schema order.
+/// * `col_offset` - Current horizontal offset (starting column in `all_cols`).
+/// * `visible_cols` - Maximum number of feature columns that can be shown.
+///
+/// # Returns
+/// A subslice of `all_cols` representing the currently visible feature columns.
+fn feature_window<'a>(
+    all_cols: &'a [usize],
+    col_offset: usize,
+    visible_cols: usize,
+) -> &'a [usize] {
+    let start = col_offset.min(all_cols.len());
+    let end = (start + visible_cols).min(all_cols.len());
+    &all_cols[start..end]
+}
+
+// === Header / rows =========================================================
+
+/// Build the table header row for the current feature window.
+///
+/// # Arguments
+/// * `batch` - Arrow `RecordBatch` providing schema information for column names.
+/// * `col_window` - Slice of feature column indices to display.
+///
+/// The header contains:
+/// - a leading `"Row"` column,
+/// - one column per `col_*` feature in `col_window`,
+/// - two trailing columns `"avg"` and `"std"` for per-row statistics.
+fn render_header<'a>(batch: &'a RecordBatch, col_window: &'a [usize]) -> Row<'a> {
+    let schema = batch.schema();
+    let mut header_cells = vec!["Row".to_string()];
+    for &i in col_window {
+        header_cells.push(schema.field(i).name().to_string());
+    }
+    header_cells.push("avg".to_string());
+    header_cells.push("std".to_string());
+
+    Row::new(header_cells)
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .height(1)
+}
+
+/// Build all table rows for the current feature window, including per-row stats.
+///
+/// # Arguments
+/// * `batch`      - Arrow `RecordBatch` containing the data.
+/// * `col_window` - Slice of feature column indices currently visible (for display).
+/// * `all_cols`   - Slice of all `col_*` feature indices (for stats over the full row).
+///
+/// The last two cells (`avg`, `std`) are computed over **all** numeric `col_*`
+/// features in `all_cols`, so their values do not change when scrolling.
+fn render_rows<'a>(
+    batch: &'a RecordBatch,
+    col_window: &'a [usize],
+    all_cols: &'a [usize],
+) -> Vec<Row<'a>> {
+    let num_rows = batch.num_rows();
+
+    (0..num_rows)
+        .map(|row_idx| {
+            let mut cells = vec![row_idx.to_string()];
+
+            // 1. Visible cells (only col_window)
+            for &col_idx in col_window {
+                let col = batch.column(col_idx);
+                let s = format_value(col, row_idx);
+                cells.push(s);
+            }
+
+            // 2. Stats over ALL feature columns (all_cols)
+            let mut vals: Vec<f64> = Vec::with_capacity(all_cols.len());
+
+            for &col_idx in all_cols {
+                let col = batch.column(col_idx);
+                if col.is_null(row_idx) {
+                    continue;
+                }
+                match col.data_type() {
+                    DataType::Float32 => {
+                        let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                        vals.push(a.value(row_idx) as f64);
+                    }
+                    DataType::Float64 => {
+                        let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                        vals.push(a.value(row_idx));
+                    }
+                    DataType::Int32 => {
+                        let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                        vals.push(a.value(row_idx) as f64);
+                    }
+                    DataType::Int64 => {
+                        let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                        vals.push(a.value(row_idx) as f64);
+                    }
+                    DataType::UInt32 => {
+                        let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                        vals.push(a.value(row_idx) as f64);
+                    }
+                    DataType::UInt64 => {
+                        let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                        vals.push(a.value(row_idx) as f64);
+                    }
+                    _ => {}
+                }
+            }
+
+            let (avg_str, std_str) = if vals.is_empty() {
+                ("NA".to_string(), "NA".to_string())
+            } else {
+                let n = vals.len() as f64;
+                let sum: f64 = vals.iter().sum();
+                let mean = sum / n;
+                let var: f64 = vals.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n;
+                let std = var.sqrt();
+                (format!("{:.4}", mean), format!("{:.4}", std))
+            };
+
+            cells.push(avg_str);
+            cells.push(std_str);
+
+            Row::new(cells).height(1)
+        })
+        .collect()
+}
+
+// === UI ====================================================================
+
+/// Render the full TUI layout for a single frame.
+///
+/// # Arguments
+/// * `f` - Mutable ratatui `Frame` used for drawing widgets.
+/// * `batch` - Arrow `RecordBatch` backing the table view.
+/// * `all_col_indices` - Slice of all `col_*` feature column indices.
+/// * `col_offset` - Current horizontal offset into `all_col_indices`.
+/// * `visible_cols` - Maximum number of feature columns to show at once.
+/// * `num_rows` - Total number of rows in `batch`.
+/// * `num_cols` - Total number of columns in `batch` (including metadata).
+///
+/// Layout:
+/// - Top: metadata block showing `name_id`, `n_rows`, `n_cols` (if available).
+/// - Middle: main table with row id, feature columns, and avg/std per row.
+/// - Bottom: status bar with dimensions and key bindings.
+fn render_ui(
+    f: &mut Frame,
+    batch: &RecordBatch,
+    all_col_indices: &[usize],
+    col_offset: usize,
+    visible_cols: usize,
+    num_rows: usize,
+    num_cols: usize,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .split(f.area());
+
+    let schema = batch.schema();
+
+    // Metadata header
+    let mut name_idx = None;
+    let mut n_rows_idx = None;
+    let mut n_cols_idx = None;
+    for (i, field) in schema.fields().iter().enumerate() {
+        match field.name().as_str() {
+            "name_id" => name_idx = Some(i),
+            "n_rows" => n_rows_idx = Some(i),
+            "n_cols" => n_cols_idx = Some(i),
+            _ => {}
+        }
+    }
+
+    let meta_text = if let Some(name_i) = name_idx {
+        let name = format_value(batch.column(name_i), 0);
+        let nrows_val = n_rows_idx
+            .map(|i| format_value(batch.column(i), 0))
+            .unwrap_or_else(|| "?".to_string());
+        let ncols_val = n_cols_idx
+            .map(|i| format_value(batch.column(i), 0))
+            .unwrap_or_else(|| "?".to_string());
+        format!("name_id: {name}    n_rows: {nrows_val}    n_cols: {ncols_val}")
+    } else {
+        format!("rows: {num_rows}    cols: {num_cols}")
+    };
+
+    let header_paragraph = Paragraph::new(Span::raw(meta_text))
+        .block(Block::default().borders(Borders::ALL).title(" Metadata "));
+    f.render_widget(header_paragraph, chunks[0]);
+
+    // Main table
+    let col_window = feature_window(all_col_indices, col_offset, visible_cols);
+    let header_row = render_header(batch, col_window);
+    let rows = render_rows(batch, col_window, all_col_indices);
+
+    let mut widths = vec![Constraint::Length(5)]; // Row id
+    for _ in col_window {
+        widths.push(Constraint::Length(12));
+    }
+    widths.push(Constraint::Length(10)); // avg
+    widths.push(Constraint::Length(10)); // std
+
+    let total_feat_cols = all_col_indices.len();
+    let start_col = if total_feat_cols == 0 {
+        0
+    } else {
+        col_offset + 1
+    };
+    let end_col = (col_offset + col_window.len()).min(total_feat_cols);
+
+    let table = Table::new(rows, widths)
+        .header(header_row)
+        .block(Block::default().borders(Borders::ALL).title(format!(
+            " Lance Data (feature cols {}–{} of {}) ",
+            start_col, end_col, total_feat_cols
+        )))
+        .column_spacing(1);
+
+    f.render_widget(table, chunks[1]);
+
+    let status = format!(
+        " {} rows × {} total cols | {} feature cols (col_*) | avg/std over ALL feature cols | ← → scroll | 'h' home | 'e' end | 'q' quit ",
+        num_rows, num_cols, total_feat_cols
+    );
+    let status_widget = Block::default().borders(Borders::ALL).title(status);
+    f.render_widget(status_widget, chunks[2]);
+}
