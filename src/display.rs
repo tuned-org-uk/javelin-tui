@@ -51,13 +51,13 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
 
     let mut col_offset: usize = 0; // horizontal scroll over features
     let mut row_offset: usize = 0; // horizontal scroll over rows (transposed)
-    let visible: usize = 8; // number of visible items (cols or rows)
+    let mut row_start: usize = 0; // vertical scroll (top visible data row) for both modes
+    let visible: usize = 8; // number of visible items horizontally
     let mut transposed = false; // false = N×F, true = F×N
 
     loop {
         terminal.draw(|f| {
             if transposed {
-                // call into display_transposed.rs
                 render_transposed_ui(
                     f,
                     batch,
@@ -66,9 +66,9 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                     visible,
                     num_rows,
                     num_cols,
+                    row_start, // NEW: vertical start for features
                 );
             } else {
-                // normal N×F view
                 render_base_ui(
                     f,
                     batch,
@@ -77,6 +77,7 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                     visible,
                     num_rows,
                     num_cols,
+                    row_start, // NEW: vertical start for rows
                 );
             }
         })?;
@@ -93,20 +94,25 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                 col_offset = max_col_off;
             }
         }
+        // clamp vertical row_start
+        let max_row_start = num_rows.saturating_sub(1);
+        if row_start > max_row_start {
+            row_start = max_row_start;
+        }
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(KeyEvent { code, .. }) = event::read()? {
                 match code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
 
-                    // toggle transpose mode
                     KeyCode::Char('t') => {
                         transposed = !transposed;
                         col_offset = 0;
                         row_offset = 0;
+                        row_start = 0;
                     }
 
-                    // scroll right
+                    // horizontal right
                     KeyCode::Right | KeyCode::Char('l') => {
                         if transposed {
                             let max = num_rows.saturating_sub(visible);
@@ -120,21 +126,18 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                             }
                         }
                     }
-
-                    // scroll left / home
+                    // horizontal left
                     KeyCode::Left | KeyCode::Char('h') => {
                         if transposed {
                             if row_offset > 0 {
                                 row_offset -= 1;
                             }
-                        } else {
-                            if col_offset > 0 {
-                                col_offset -= 1;
-                            }
+                        } else if col_offset > 0 {
+                            col_offset -= 1;
                         }
                     }
 
-                    // jump to first
+                    // jump first/last horizontally
                     KeyCode::Char('H') => {
                         if transposed {
                             row_offset = 0;
@@ -142,13 +145,23 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                             col_offset = 0;
                         }
                     }
-
-                    // jump to last
                     KeyCode::Char('E') => {
                         if transposed {
                             row_offset = num_rows.saturating_sub(visible);
                         } else {
                             col_offset = all_col_indices.len().saturating_sub(visible);
+                        }
+                    }
+
+                    // VERTICAL SCROLL
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if row_start > 0 {
+                            row_start -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if row_start < max_row_start {
+                            row_start += 1;
                         }
                     }
 
@@ -161,7 +174,6 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
-
     Ok(())
 }
 
@@ -415,19 +427,21 @@ fn render_base_ui(
     visible_cols: usize,
     num_rows: usize,
     num_cols: usize,
+    row_start: usize,
 ) {
+    // 1) Split into metadata / table / status, same as transposed
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(3), // metadata
+            Constraint::Min(0),    // table
+            Constraint::Length(3), // status
         ])
         .split(f.area());
 
     let schema = batch.schema();
 
-    // Metadata header
+    // ---- Metadata header (same logic you already use in transposed) ----
     let mut name_idx = None;
     let mut n_rows_idx = None;
     let mut n_cols_idx = None;
@@ -457,12 +471,19 @@ fn render_base_ui(
         .block(Block::default().borders(Borders::ALL).title(" Metadata "));
     f.render_widget(header_paragraph, chunks[0]);
 
-    // Main table
+    // ---- Determine vertical window for table rows based on chunks[1].height ----
+    let table_area_height = chunks[1].height.saturating_sub(3); // header row + borders
+    let max_visible_rows = table_area_height as usize;
+    let end_row = (row_start + max_visible_rows).min(num_rows);
+
+    // ---- Horizontal window over features, as before ----
     let col_window = feature_window(all_col_indices, col_offset, visible_cols);
     let header_row = render_header(batch, col_window);
-    let rows = render_rows(batch, col_window, all_col_indices);
 
-    let mut widths = vec![Constraint::Length(5)]; // Row id
+    // Render only rows [row_start, end_row)
+    let rows = render_rows_window(batch, col_window, all_col_indices, row_start, end_row);
+
+    let mut widths = vec![Constraint::Length(5)]; // "Row" column
     for _ in col_window {
         widths.push(Constraint::Length(12));
     }
@@ -477,20 +498,103 @@ fn render_base_ui(
     };
     let end_col = (col_offset + col_window.len()).min(total_feat_cols);
 
+    let title = format!(
+        " Lance Data (rows {}–{} of {}, feature cols {}–{} of {}) ",
+        row_start + 1,
+        end_row,
+        num_rows,
+        start_col,
+        end_col,
+        total_feat_cols
+    );
+
     let table = Table::new(rows, widths)
         .header(header_row)
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            " Lance Data (feature cols {}–{} of {}) ",
-            start_col, end_col, total_feat_cols
-        )))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .column_spacing(1);
 
     f.render_widget(table, chunks[1]);
 
+    // ---- Status bar at bottom ----
     let status = format!(
-        " {} rows × {} total cols | {} feature cols (col_*) | avg/std over ALL feature cols | ← → scroll | 'h' home | 'e' end | 'q' quit ",
+        " {} rows × {} total cols | {} feature cols (col_*) | mode: N×F | ↑↓ scroll rows | ←→ scroll features | t transpose | q quit ",
         num_rows, num_cols, total_feat_cols
     );
     let status_widget = Block::default().borders(Borders::ALL).title(status);
     f.render_widget(status_widget, chunks[2]);
+}
+
+fn render_rows_window<'a>(
+    batch: &'a RecordBatch,
+    col_window: &'a [usize],
+    all_cols: &'a [usize],
+    row_start: usize,
+    row_end: usize,
+) -> Vec<Row<'a>> {
+    let mut out = Vec::with_capacity(row_end.saturating_sub(row_start));
+
+    for row_idx in row_start..row_end {
+        let mut cells = vec![row_idx.to_string()];
+
+        // visible feature values
+        for &col_idx in col_window {
+            let col = batch.column(col_idx);
+            let s = format_value(col, row_idx);
+            cells.push(s);
+        }
+
+        // stats over ALL features (unchanged from your existing render_rows)
+        let mut vals: Vec<f64> = Vec::with_capacity(all_cols.len());
+        for &col_idx in all_cols {
+            let col = batch.column(col_idx);
+            if col.is_null(row_idx) {
+                continue;
+            }
+            match col.data_type() {
+                DataType::Float32 => {
+                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::Float64 => {
+                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    vals.push(a.value(row_idx));
+                }
+                DataType::Int32 => {
+                    let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::Int64 => {
+                    let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::UInt32 => {
+                    let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::UInt64 => {
+                    let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                _ => {}
+            }
+        }
+
+        let (avg_str, std_str) = if vals.is_empty() {
+            ("NA".to_string(), "NA".to_string())
+        } else {
+            let n = vals.len() as f64;
+            let sum: f64 = vals.iter().sum();
+            let mean = sum / n;
+            let var: f64 = vals.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n;
+            let std = var.sqrt();
+            (format!("{:.4}", mean), format!("{:.4}", std))
+        };
+
+        cells.push(avg_str);
+        cells.push(std_str);
+
+        out.push(Row::new(cells).height(1));
+    }
+
+    out
 }

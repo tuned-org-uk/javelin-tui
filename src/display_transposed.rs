@@ -28,6 +28,7 @@ pub fn render_transposed_ui(
     visible: usize,
     num_rows: usize,
     num_cols: usize,
+    row_start: usize, // NEW: top feature index
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -38,31 +39,41 @@ pub fn render_transposed_ui(
         ])
         .split(f.area());
 
-    // ----- Metadata header reused from normal view -----
     let meta_text = build_metadata_line(batch, num_rows, num_cols);
     let header_paragraph = Paragraph::new(Span::raw(meta_text))
         .block(Block::default().borders(Borders::ALL).title(" Metadata "));
     f.render_widget(header_paragraph, chunks[0]);
 
-    // ----- Main table (features × rows) -----
+    // compute visible feature rows based on terminal height
+    let data_area_height = chunks[1].height.saturating_sub(3);
+    let max_visible_feats = data_area_height as usize;
+    let total_feats = all_cols.len();
+    let feat_start = row_start.min(total_feats);
+    let feat_end = (feat_start + max_visible_feats).min(total_feats);
+    let feat_window = &all_cols[feat_start..feat_end];
+
     let row_window = row_window(num_rows, row_offset, visible);
     let header_row = render_header_transposed(&row_window);
-    let rows = render_rows_transposed(batch, &row_window, all_cols);
+    let rows = render_rows_transposed_window(batch, &row_window, feat_window);
 
-    let mut widths = vec![Constraint::Length(10)]; // Feature name
+    let mut widths = vec![Constraint::Length(10)];
     for _ in &row_window {
         widths.push(Constraint::Length(10));
     }
-    widths.push(Constraint::Length(10)); // avg
-    widths.push(Constraint::Length(10)); // std
+    widths.push(Constraint::Length(10));
+    widths.push(Constraint::Length(10));
 
-    let total_rows = num_rows;
-    let start_r = if total_rows == 0 { 0 } else { row_offset + 1 };
-    let end_r = (row_offset + row_window.len()).min(total_rows);
+    let start_r = if num_rows == 0 { 0 } else { row_offset + 1 };
+    let end_r = (row_offset + row_window.len()).min(num_rows);
 
     let title = format!(
-        " Lance Data (features × rows, rows {}–{} of {}) ",
-        start_r, end_r, total_rows
+        " Lance Data (features {}–{} of {}, rows {}–{} of {}) ",
+        feat_start + 1,
+        feat_end,
+        total_feats,
+        start_r,
+        end_r,
+        num_rows
     );
 
     let table = Table::new(rows, widths)
@@ -72,15 +83,84 @@ pub fn render_transposed_ui(
 
     f.render_widget(table, chunks[1]);
 
-    // ----- Status bar -----
     let status = format!(
-        " {} rows × {} total cols | {} feature cols (col_*) | mode: F×N (transposed) | keys: t transpose, ← → scroll, 'h' home, 'e' end, 'q' quit ",
-        num_rows,
-        num_cols,
-        all_cols.len(),
+        " {} rows × {} total cols | {} feature cols (col_*) | mode: F×N | ↑↓ scroll features | ←→ scroll rows | t transpose | q quit ",
+        num_rows, num_cols, total_feats,
     );
     let status_widget = Block::default().borders(Borders::ALL).title(status);
     f.render_widget(status_widget, chunks[2]);
+}
+
+fn render_rows_transposed_window<'a>(
+    batch: &'a RecordBatch,
+    row_window: &'a [usize],
+    feat_window: &'a [usize],
+) -> Vec<Row<'a>> {
+    let mut out = Vec::with_capacity(feat_window.len());
+
+    for &col_idx in feat_window {
+        let col = batch.column(col_idx);
+        let name = batch.schema().field(col_idx).name().to_string();
+        let mut cells = vec![name];
+
+        for &row_idx in row_window {
+            cells.push(format_value(col, row_idx));
+        }
+
+        // stats over all rows (same as existing render_rows_transposed)
+        let mut vals: Vec<f64> = Vec::new();
+        let n_rows = batch.num_rows();
+        for row_idx in 0..n_rows {
+            if col.is_null(row_idx) {
+                continue;
+            }
+            match col.data_type() {
+                DataType::Float32 => {
+                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::Float64 => {
+                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    vals.push(a.value(row_idx));
+                }
+                DataType::Int32 => {
+                    let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::Int64 => {
+                    let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::UInt32 => {
+                    let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                DataType::UInt64 => {
+                    let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                    vals.push(a.value(row_idx) as f64);
+                }
+                _ => {}
+            }
+        }
+
+        let (avg_str, std_str) = if vals.is_empty() {
+            ("NA".to_string(), "NA".to_string())
+        } else {
+            let n = vals.len() as f64;
+            let sum: f64 = vals.iter().sum();
+            let mean = sum / n;
+            let var: f64 = vals.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n;
+            let std = var.sqrt();
+            (format!("{:.4}", mean), format!("{:.4}", std))
+        };
+
+        cells.push(avg_str);
+        cells.push(std_str);
+
+        out.push(Row::new(cells).height(1));
+    }
+
+    out
 }
 
 /// Build the metadata line, shared with the non-transposed view.
