@@ -17,6 +17,8 @@ use ratatui::{
 };
 use std::io;
 
+use crate::display_transposed::render_transposed_ui;
+
 // === Public entry point =====================================================
 
 /// Launch an interactive spreadsheet-like TUI for a Lance `RecordBatch`.
@@ -47,43 +49,109 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut col_offset: usize = 0;
-    let visible_cols: usize = 8;
+    let mut col_offset: usize = 0; // horizontal scroll over features
+    let mut row_offset: usize = 0; // horizontal scroll over rows (transposed)
+    let visible: usize = 8; // number of visible items (cols or rows)
+    let mut transposed = false; // false = N×F, true = F×N
 
     loop {
         terminal.draw(|f| {
-            render_ui(
-                f,
-                batch,
-                &all_col_indices,
-                col_offset,
-                visible_cols,
-                num_rows,
-                num_cols,
-            );
+            if transposed {
+                // call into display_transposed.rs
+                render_transposed_ui(
+                    f,
+                    batch,
+                    &all_col_indices,
+                    row_offset,
+                    visible,
+                    num_rows,
+                    num_cols,
+                );
+            } else {
+                // normal N×F view
+                render_base_ui(
+                    f,
+                    batch,
+                    &all_col_indices,
+                    col_offset,
+                    visible,
+                    num_rows,
+                    num_cols,
+                );
+            }
         })?;
 
-        let max_offset = all_col_indices.len().saturating_sub(visible_cols);
-        if col_offset > max_offset {
-            col_offset = max_offset;
+        // clamp offsets after drawing
+        if transposed {
+            let max_row_off = num_rows.saturating_sub(visible);
+            if row_offset > max_row_off {
+                row_offset = max_row_off;
+            }
+        } else {
+            let max_col_off = all_col_indices.len().saturating_sub(visible);
+            if col_offset > max_col_off {
+                col_offset = max_col_off;
+            }
         }
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(KeyEvent { code, .. }) = event::read()? {
                 match code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+
+                    // toggle transpose mode
+                    KeyCode::Char('t') => {
+                        transposed = !transposed;
+                        col_offset = 0;
+                        row_offset = 0;
+                    }
+
+                    // scroll right
                     KeyCode::Right | KeyCode::Char('l') => {
-                        if col_offset < max_offset {
-                            col_offset += 1;
+                        if transposed {
+                            let max = num_rows.saturating_sub(visible);
+                            if row_offset < max {
+                                row_offset += 1;
+                            }
+                        } else {
+                            let max = all_col_indices.len().saturating_sub(visible);
+                            if col_offset < max {
+                                col_offset += 1;
+                            }
                         }
                     }
+
+                    // scroll left / home
                     KeyCode::Left | KeyCode::Char('h') => {
-                        if col_offset > 0 {
-                            col_offset -= 1;
+                        if transposed {
+                            if row_offset > 0 {
+                                row_offset -= 1;
+                            }
+                        } else {
+                            if col_offset > 0 {
+                                col_offset -= 1;
+                            }
                         }
                     }
-                    KeyCode::Char('H') => col_offset = 0,
-                    KeyCode::Char('E') => col_offset = max_offset,
+
+                    // jump to first
+                    KeyCode::Char('H') => {
+                        if transposed {
+                            row_offset = 0;
+                        } else {
+                            col_offset = 0;
+                        }
+                    }
+
+                    // jump to last
+                    KeyCode::Char('E') => {
+                        if transposed {
+                            row_offset = num_rows.saturating_sub(visible);
+                        } else {
+                            col_offset = all_col_indices.len().saturating_sub(visible);
+                        }
+                    }
+
                     _ => {}
                 }
             }
@@ -339,7 +407,7 @@ fn render_rows<'a>(
 /// - Top: metadata block showing `name_id`, `n_rows`, `n_cols` (if available).
 /// - Middle: main table with row id, feature columns, and avg/std per row.
 /// - Bottom: status bar with dimensions and key bindings.
-fn render_ui(
+fn render_base_ui(
     f: &mut Frame,
     batch: &RecordBatch,
     all_col_indices: &[usize],

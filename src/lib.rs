@@ -1,4 +1,5 @@
 pub mod display;
+pub mod display_transposed;
 pub mod functions;
 
 use clap::{Parser, Subcommand};

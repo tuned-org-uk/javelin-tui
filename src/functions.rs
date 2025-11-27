@@ -1,6 +1,10 @@
 use anyhow::{Context, Result};
+use arrow::compute::take;
+use arrow_array::ArrayRef;
 use lance::dataset::Dataset;
+use rand::seq::SliceRandom;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::display::*;
 
@@ -73,34 +77,58 @@ pub async fn cmd_head(filepath: &PathBuf, n: usize) -> Result<()> {
 }
 
 pub async fn cmd_sample(filepath: &PathBuf, n: usize) -> Result<()> {
-    use lance::dataset::Dataset;
-    use rand::seq::SliceRandom;
-
-    println!("=== {} random samples ===", n);
+    println!("=== {} random samples (interactive) ===", n);
 
     let uri = format!("file://{}", filepath.canonicalize()?.display());
     let dataset = Dataset::open(&uri).await?;
 
     let total_rows = dataset.count_rows(None).await?;
-
     if total_rows == 0 {
         println!("Dataset is empty");
         return Ok(());
     }
 
-    // Generate random indices
+    let n = n.min(total_rows);
     let mut rng = rand::rng();
-    let mut indices: Vec<usize> = (0..total_rows).collect();
+    let mut indices: Vec<i64> = (0..total_rows as i64).collect();
     indices.shuffle(&mut rng);
-    indices.truncate(n.min(total_rows));
+    indices.truncate(n);
     indices.sort_unstable();
 
     println!("Sampling {} rows from {} total", indices.len(), total_rows);
-    println!("Indices: {:?}", indices);
 
-    // Note: Lance doesn't have direct row indexing, so we'd need to scan
-    // For now, just show the approach
-    println!("\n(Full sampling implementation requires scanning and filtering)");
+    // For simplicity, read the first `max_index+1` rows into a batch,
+    // then use Arrow `take` to select only sampled indices.
+    let max_index = *indices.last().unwrap() as i64;
+
+    let mut scanner = dataset.scan();
+    let batch = scanner
+        .limit(Some(max_index + 1), None)?
+        .try_into_batch()
+        .await?;
+
+    if batch.num_rows() == 0 {
+        println!("No data to display");
+        return Ok(());
+    }
+
+    // Build an index array to "take" the sampled rows from the batch
+    let index_array = Arc::new(arrow::array::Int64Array::from(indices.clone())) as ArrayRef;
+
+    let mut sampled_columns = Vec::with_capacity(batch.num_columns());
+    for col in batch.columns() {
+        let taken = take(col.as_ref(), &index_array, None)?;
+        sampled_columns.push(Arc::from(taken));
+    }
+
+    let sampled_batch = arrow_array::RecordBatch::try_new(batch.schema(), sampled_columns)?;
+
+    if sampled_batch.num_rows() == 0 {
+        println!("No sampled data to display");
+        return Ok(());
+    }
+
+    display_spreadsheet_interactive(&sampled_batch)?;
 
     Ok(())
 }
