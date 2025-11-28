@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use arrow::array::*;
 use arrow::datatypes::DataType;
 use arrow_array::{ArrayRef, RecordBatch};
@@ -17,7 +17,7 @@ use ratatui::{
 };
 use std::io;
 
-use crate::display_transposed::render_transposed_ui;
+use crate::{display_transposed::render_transposed_ui, functions::LanceLayout};
 
 // === Public entry point =====================================================
 
@@ -33,15 +33,31 @@ use crate::display_transposed::render_transposed_ui;
 /// - lets the user scroll horizontally over feature columns,
 /// - and exits when the user presses `q` or `Esc`.
 pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
+    use log::{debug, info};
+
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
+    let layout = crate::functions::detect_lance_layout(batch);
+
+    info!(
+        "display_spreadsheet_interactive: starting viewer for batch (rows={}, cols={})",
+        num_rows, num_cols
+    );
 
     if num_cols == 0 {
         println!("No columns to display");
-        return Ok(());
+        info!("display_spreadsheet_interactive: abort, no columns");
+        return Err(anyhow!(
+            "display_spreadsheet_interactive: abort, no columns"
+        ));
     }
 
+    // Discover all feature columns once (col_*)
     let all_col_indices = collect_feature_cols(batch)?;
+    info!(
+        "display_spreadsheet_interactive: found {} feature columns (col_*)",
+        all_col_indices.len()
+    );
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -49,67 +65,95 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut col_offset: usize = 0; // horizontal scroll over features
-    let mut row_offset: usize = 0; // horizontal scroll over rows (transposed)
-    let mut row_start: usize = 0; // vertical scroll (top visible data row) for both modes
+    let mut col_offset: usize = 0; // horizontal scroll over features (N×F)
+    let mut row_offset: usize = 0; // horizontal scroll over rows (F×N)
+    let mut row_start: usize = 0; // vertical scroll (top visible row / feature)
     let visible: usize = 8; // number of visible items horizontally
     let mut transposed = false; // false = N×F, true = F×N
 
+    info!(
+        "display_spreadsheet_interactive: initial state mode=N×F, visible={}, offsets=(col=0,row=0,start=0)",
+        visible
+    );
+
     loop {
-        terminal.draw(|f| {
-            if transposed {
-                render_transposed_ui(
-                    f,
-                    batch,
-                    &all_col_indices,
-                    row_offset,
-                    visible,
-                    num_rows,
-                    num_cols,
-                    row_start, // NEW: vertical start for features
-                );
-            } else {
-                render_base_ui(
-                    f,
-                    batch,
-                    &all_col_indices,
-                    col_offset,
-                    visible,
-                    num_rows,
-                    num_cols,
-                    row_start, // NEW: vertical start for rows
-                );
+        terminal.draw(|f| match layout {
+            LanceLayout::SparseCoo => crate::display_coo::render_coo_ui(f, batch, row_start),
+            _ => {
+                if transposed {
+                    render_transposed_ui(
+                        f,
+                        batch,
+                        &all_col_indices,
+                        row_offset,
+                        visible,
+                        num_rows,
+                        num_cols,
+                        row_start,
+                    );
+                } else {
+                    render_base_ui(
+                        f,
+                        batch,
+                        &all_col_indices,
+                        col_offset,
+                        visible,
+                        num_rows,
+                        num_cols,
+                        row_start,
+                    );
+                }
             }
         })?;
 
-        // clamp offsets after drawing
+        // clamp horizontal offsets
         if transposed {
             let max_row_off = num_rows.saturating_sub(visible);
             if row_offset > max_row_off {
+                debug!(
+                    "display_spreadsheet_interactive: clamp row_offset {} -> {}",
+                    row_offset, max_row_off
+                );
                 row_offset = max_row_off;
             }
         } else {
             let max_col_off = all_col_indices.len().saturating_sub(visible);
             if col_offset > max_col_off {
+                debug!(
+                    "display_spreadsheet_interactive: clamp col_offset {} -> {}",
+                    col_offset, max_col_off
+                );
                 col_offset = max_col_off;
             }
         }
-        // clamp vertical row_start
+
+        // clamp vertical offset
         let max_row_start = num_rows.saturating_sub(1);
         if row_start > max_row_start {
+            debug!(
+                "display_spreadsheet_interactive: clamp row_start {} -> {}",
+                row_start, max_row_start
+            );
             row_start = max_row_start;
         }
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(KeyEvent { code, .. }) = event::read()? {
                 match code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        info!("display_spreadsheet_interactive: user quit (q/ESC)");
+                        break;
+                    }
 
                     KeyCode::Char('t') => {
                         transposed = !transposed;
                         col_offset = 0;
                         row_offset = 0;
                         row_start = 0;
+                        info!(
+                            "display_spreadsheet_interactive: toggle transpose -> mode={} (N×F=false,F×N=true)",
+                            transposed
+                        );
                     }
 
                     // horizontal right
@@ -118,22 +162,39 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                             let max = num_rows.saturating_sub(visible);
                             if row_offset < max {
                                 row_offset += 1;
+                                debug!(
+                                    "display_spreadsheet_interactive: row_offset -> {} (F×N, →)",
+                                    row_offset
+                                );
                             }
                         } else {
                             let max = all_col_indices.len().saturating_sub(visible);
                             if col_offset < max {
                                 col_offset += 1;
+                                debug!(
+                                    "display_spreadsheet_interactive: col_offset -> {} (N×F, →)",
+                                    col_offset
+                                );
                             }
                         }
                     }
+
                     // horizontal left
                     KeyCode::Left | KeyCode::Char('h') => {
                         if transposed {
                             if row_offset > 0 {
                                 row_offset -= 1;
+                                debug!(
+                                    "display_spreadsheet_interactive: row_offset -> {} (F×N, ←)",
+                                    row_offset
+                                );
                             }
                         } else if col_offset > 0 {
                             col_offset -= 1;
+                            debug!(
+                                "display_spreadsheet_interactive: col_offset -> {} (N×F, ←)",
+                                col_offset
+                            );
                         }
                     }
 
@@ -141,27 +202,45 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
                     KeyCode::Char('H') => {
                         if transposed {
                             row_offset = 0;
+                            debug!("display_spreadsheet_interactive: row_offset -> 0 (H)");
                         } else {
                             col_offset = 0;
+                            debug!("display_spreadsheet_interactive: col_offset -> 0 (H)");
                         }
                     }
                     KeyCode::Char('E') => {
                         if transposed {
                             row_offset = num_rows.saturating_sub(visible);
+                            debug!(
+                                "display_spreadsheet_interactive: row_offset -> {} (E)",
+                                row_offset
+                            );
                         } else {
                             col_offset = all_col_indices.len().saturating_sub(visible);
+                            debug!(
+                                "display_spreadsheet_interactive: col_offset -> {} (E)",
+                                col_offset
+                            );
                         }
                     }
 
-                    // VERTICAL SCROLL
+                    // vertical scroll
                     KeyCode::Up | KeyCode::Char('k') => {
                         if row_start > 0 {
                             row_start -= 1;
+                            debug!(
+                                "display_spreadsheet_interactive: row_start -> {} (↑/k)",
+                                row_start
+                            );
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         if row_start < max_row_start {
                             row_start += 1;
+                            debug!(
+                                "display_spreadsheet_interactive: row_start -> {} (↓/j)",
+                                row_start
+                            );
                         }
                     }
 
@@ -174,6 +253,7 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+    info!("display_spreadsheet_interactive: terminal restored, exiting viewer");
     Ok(())
 }
 
@@ -238,20 +318,21 @@ fn format_value(array: &ArrayRef, row_idx: usize) -> String {
 
 // === Column selection / windows ============================================
 
-/// Collect the indices of all feature columns whose names start with `col_`.
+/// Collect the indices of all feature columns used by the viewer.
 ///
-/// # Arguments
-/// * `batch` - Arrow `RecordBatch` whose schema is inspected.
+/// Primary mode:
+///   - columns whose names start with `col_` (dense feature matrices).
 ///
-/// # Returns
-/// A vector of column indices in schema order corresponding to `col_*` fields.
-///
-/// # Errors
-/// Returns an error if no columns with the `col_` prefix are found, as the
-/// viewer expects a wide columnar schema with `col_*` feature columns.
+/// Fallbacks when no `col_*` columns exist:
+///   - if there is exactly one column, treat it as a single feature
+///     (1D vectors like lambdas, centroid_map, norms, etc.);
+///   - otherwise, treat all numeric columns as features
+///     (e.g. sparse COO {row, col, value}).
 fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
     let schema = batch.schema();
-    let cols: Vec<usize> = schema
+
+    // 1) Preferred: explicit `col_*` feature columns
+    let mut cols: Vec<usize> = schema
         .fields()
         .iter()
         .enumerate()
@@ -264,9 +345,44 @@ fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
         })
         .collect();
 
-    if cols.is_empty() {
-        bail!("The file should be formatted with col_* using wide columnar schema");
+    if !cols.is_empty() {
+        return Ok(cols);
     }
+
+    // 2) Fallback for 1D vectors: single column => treat as one feature
+    if batch.num_columns() == 1 {
+        return Ok(vec![0]);
+    }
+
+    // 3) Fallback for generic numeric tables (e.g. sparse COO row/col/value):
+    //    use all numeric columns as features.
+    cols = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match f.data_type() {
+            DataType::Float32
+            | DataType::Float64
+            | DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64 => Some(i),
+            _ => None,
+        })
+        .collect();
+
+    if cols.is_empty() {
+        bail!(
+            "The file should be formatted with `col_*` feature columns \
+             or at least one numeric column; got schema {:?}",
+            schema
+        );
+    }
+
     Ok(cols)
 }
 

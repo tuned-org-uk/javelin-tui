@@ -12,9 +12,11 @@ enum AppError {
     Head(Error),
     Sample(Error),
     Stats(Error),
+    Display(Error),
 }
 
 fn main() -> Result<()> {
+    javelin::init();
     let args = Cli::parse();
     let filepath = args.filepath;
 
@@ -39,6 +41,9 @@ fn main() -> Result<()> {
         // Command::Clusters => cmd_clusters(&filepath),
         Command::Tui => rt.block_on(async {
             let _ = run_tui(filepath);
+        }),
+        Command::Display => rt.block_on(async {
+            let _ = cmd_display(&filepath).await.map_err(AppError::Display);
         }),
     };
 
