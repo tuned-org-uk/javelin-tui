@@ -17,7 +17,9 @@ use ratatui::{
 };
 use std::io;
 
-use crate::{display_transposed::render_transposed_ui, functions::LanceLayout};
+use crate::{
+    display_1d::render_1d_ui, display_transposed::render_transposed_ui, functions::LanceLayout,
+};
 
 // === Public entry point =====================================================
 
@@ -79,6 +81,18 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     loop {
         terminal.draw(|f| match layout {
             LanceLayout::SparseCoo => crate::display_coo::render_coo_ui(f, batch, row_start),
+            LanceLayout::Vector1D => {
+                render_1d_ui(
+                    f,
+                    batch,
+                    &all_col_indices,
+                    col_offset,
+                    visible,
+                    num_rows,
+                    num_cols,
+                    row_start,
+                );
+            }
             _ => {
                 if transposed {
                     render_transposed_ui(
@@ -277,11 +291,11 @@ fn format_value(array: &ArrayRef, row_idx: usize) -> String {
     match array.data_type() {
         DataType::Float32 => {
             let arr = array.as_any().downcast_ref::<Float32Array>().unwrap();
-            format!("{:.4}", arr.value(row_idx))
+            format!("{:.8}", arr.value(row_idx))
         }
         DataType::Float64 => {
             let arr = array.as_any().downcast_ref::<Float64Array>().unwrap();
-            format!("{:.4}", arr.value(row_idx))
+            format!("{:.8}", arr.value(row_idx))
         }
         DataType::Int32 => {
             let arr = array.as_any().downcast_ref::<Int32Array>().unwrap();
@@ -433,89 +447,6 @@ fn render_header<'a>(batch: &'a RecordBatch, col_window: &'a [usize]) -> Row<'a>
                 .add_modifier(Modifier::BOLD),
         )
         .height(1)
-}
-
-/// Build all table rows for the current feature window, including per-row stats.
-///
-/// # Arguments
-/// * `batch`      - Arrow `RecordBatch` containing the data.
-/// * `col_window` - Slice of feature column indices currently visible (for display).
-/// * `all_cols`   - Slice of all `col_*` feature indices (for stats over the full row).
-///
-/// The last two cells (`avg`, `std`) are computed over **all** numeric `col_*`
-/// features in `all_cols`, so their values do not change when scrolling.
-fn render_rows<'a>(
-    batch: &'a RecordBatch,
-    col_window: &'a [usize],
-    all_cols: &'a [usize],
-) -> Vec<Row<'a>> {
-    let num_rows = batch.num_rows();
-
-    (0..num_rows)
-        .map(|row_idx| {
-            let mut cells = vec![row_idx.to_string()];
-
-            // 1. Visible cells (only col_window)
-            for &col_idx in col_window {
-                let col = batch.column(col_idx);
-                let s = format_value(col, row_idx);
-                cells.push(s);
-            }
-
-            // 2. Stats over ALL feature columns (all_cols)
-            let mut vals: Vec<f64> = Vec::with_capacity(all_cols.len());
-
-            for &col_idx in all_cols {
-                let col = batch.column(col_idx);
-                if col.is_null(row_idx) {
-                    continue;
-                }
-                match col.data_type() {
-                    DataType::Float32 => {
-                        let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
-                        vals.push(a.value(row_idx) as f64);
-                    }
-                    DataType::Float64 => {
-                        let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
-                        vals.push(a.value(row_idx));
-                    }
-                    DataType::Int32 => {
-                        let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
-                        vals.push(a.value(row_idx) as f64);
-                    }
-                    DataType::Int64 => {
-                        let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
-                        vals.push(a.value(row_idx) as f64);
-                    }
-                    DataType::UInt32 => {
-                        let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
-                        vals.push(a.value(row_idx) as f64);
-                    }
-                    DataType::UInt64 => {
-                        let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
-                        vals.push(a.value(row_idx) as f64);
-                    }
-                    _ => {}
-                }
-            }
-
-            let (avg_str, std_str) = if vals.is_empty() {
-                ("NA".to_string(), "NA".to_string())
-            } else {
-                let n = vals.len() as f64;
-                let sum: f64 = vals.iter().sum();
-                let mean = sum / n;
-                let var: f64 = vals.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n;
-                let std = var.sqrt();
-                (format!("{:.4}", mean), format!("{:.4}", std))
-            };
-
-            cells.push(avg_str);
-            cells.push(std_str);
-
-            Row::new(cells).height(1)
-        })
-        .collect()
 }
 
 // === UI ====================================================================
