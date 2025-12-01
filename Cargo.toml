@@ -1,10 +1,10 @@
 [package]
-name = "javelin"
+name = "javelin-tui"
 version = "0.1.0"
 edition = "2024"
 description = "Lance / ArrowSpace inspector and TUI"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/tuned-org-uk/javelin"
+license = "Apache-2.0"
+repository = "https://github.com/tuned-org-uk/javelin-tui"
 readme = "README.md"
 
 [dependencies]
@@ -24,7 +24,8 @@ crossterm = "0.27"
 log = { version = "0.4", features = ["release_max_level_off"] }
 env_logger = "0.11"
 
-trueno-viz = "0.1"  # SIMD/GPU/WASM visualization
+[[bin]]
+name = "javelin"
 
 [profile.release]
 opt-level = 3

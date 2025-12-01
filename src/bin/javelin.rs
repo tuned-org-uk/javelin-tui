@@ -2,8 +2,8 @@ use anyhow::{Error, Result};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
 
-use javelin::functions::*;
-use javelin::{Cli, Command};
+use javelin_tui::functions::*;
+use javelin_tui::{Cli, Command};
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -19,7 +19,7 @@ enum AppError {
 fn main() -> anyhow::Result<()> {
     use std::process::exit;
 
-    javelin::init();
+    javelin_tui::init();
     let args = Cli::parse();
     let filepath = args.filepath;
 
