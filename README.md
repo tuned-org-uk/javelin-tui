@@ -13,9 +13,11 @@
                                                                                                                       
 Lance inspector and TUI for Arrow/Lance datasets.
 
-Javelin is a Rust-based command-line and TUI tool for inspecting datasets stored in the Lance format (and compatible Parquet exports). It focuses on fast, ergonomic exploration of embedding-like matrices, sparse COO data, and 1D vectors using an interactive terminal UI built on `ratatui` and `crossterm`. Next step: graph visualisations, please star  the repo.
+Javelin is a Rust-based command-line and TUI tool for inspecting datasets stored in the Lance format (and compatible Parquet exports). It focuses on fast, ergonomic exploration of embedding-like matrices, sparse COO data, and 1D vectors using an interactive terminal UI built on `ratatui` and `crossterm`. Next step: graph visualisations, please star ⭐ the repo.
 
-Installation:
+Download one of the pre-built packages.
+
+Compile with `cargo`:
 ```bash
 cargo install javelin-tui
 ```
