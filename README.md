@@ -1,25 +1,108 @@
-           _     ___ __      __ ______  _       _____  _   _  
-          | |   /   \\ \    / /|  ____|| |     |_   _|| \ | | 
-          | |  /  ^  \\ \  / / | |__   | |       | |  |  \| |  
-      _   | | /  /_\  \\ \/ /  |  __|  | |       | |  | . ` |  
-     | |__| |/  _____  \\  /   | |____ | |____  _| |_ | |\  | 
-      \____//__/     \__\\/    |______||______||_____||_| \_| 
-            |__|     |__|                                     
-                                                              
+                                                                  
+                                                                    
+              JJJJJJJJJJJ          AAA   VVVVVVVV           VVVVVVVV
+              J:::::::::J         A:::A  V::::::V           V::::::V
+              J:::::::::J        A:::::A V::::::V           V::::::V
+              JJ:::::::JJ       A:::::::AV::::::V           V::::::V
+                J:::::J        A:::::::::AV:::::V           V:::::V 
+                J:::::J       A:::::A:::::AV:::::V         V:::::V  
+                J:::::J      A:::::A A:::::AV:::::V       V:::::V   
+                J:::::j     A:::::A   A:::::AV:::::V     V:::::V    
+                J:::::J    A:::::A     A:::::AV:::::V   V:::::V     
+    JJJJJJJ     J:::::J   A:::::AAAAAAAAA:::::AV:::::V V:::::V      
+    J:::::J     J:::::J  A:::::::::::::::::::::AV:::::V:::::V       
+    J::::::J   J::::::J A:::::AAAAAAAAAAAAA:::::AV:::::::::V        
+    J:::::::JJJ:::::::JA:::::A             A:::::AV:::::::V         
+     JJ:::::::::::::JJA:::::A               A:::::AV:::::V          
+       JJ:::::::::JJ A:::::A                 A:::::AV:::V           
+         JJJJJJJJJ  AAAAAAA                   AAAAAAAVVV            
+                                                                                                                                        
+    EEEEEEEEEEEEEEEEEEEEEELLLLLLLLLLL             IIIIIIIIII        
+    E::::::::::::::::::::EL:::::::::L             I::::::::I        
+    E::::::::::::::::::::EL:::::::::L             I::::::::I        
+    EE::::::EEEEEEEEE::::ELL:::::::LL             II::::::II        
+      E:::::E       EEEEEE  L:::::L                 I::::I          
+      E:::::E               L:::::L                 I::::I          
+      E::::::EEEEEEEEEE     L:::::L                 I::::I          
+      E:::::::::::::::E     L:::::L                 I::::I          
+      E:::::::::::::::E     L:::::L                 I::::I          
+      E::::::EEEEEEEEEE     L:::::L                 I::::I          
+      E:::::E               L:::::L                 I::::I          
+      E:::::E       EEEEEE  L:::::L         LLLLLL  I::::I          
+    EE::::::EEEEEEEE:::::ELL:::::::LLLLLLLLL:::::LII::::::II        
+    E::::::::::::::::::::EL::::::::::::::::::::::LI::::::::I        
+    E::::::::::::::::::::EL::::::::::::::::::::::LI::::::::I        
+    EEEEEEEEEEEEEEEEEEEEEELLLLLLLLLLLLLLLLLLLLLLLLIIIIIIIIII        
+                                                       
+                                    NNNNNNNN        NNNNNNNN 
+                                    N:::::::N       N::::::N 
+                                    N::::::::N      N::::::N 
+                                    N:::::::::N     N::::::N 
+                                    N::::::::::N    N::::::N 
+                                    N:::::::::::N   N::::::N 
+                                    N:::::::N::::N  N::::::N 
+                                    N::::::N N::::N N::::::N 
+                                    N::::::N  N::::N:::::::N 
+                                    N::::::N   N:::::::::::N 
+                                    N::::::N    N::::::::::N 
+                                    N::::::N     N:::::::::N 
+                                    N::::::N      N::::::::N 
+                                    N::::::N       N:::::::N 
+                                    N::::::N        N::::::N 
+                                    NNNNNNNN         NNNNNNN 
+            
 # 
-#    vector  space  visualisation
+#    vector  space  embeddings  visualisation
 # 
 
 Lance inspector and TUI for Arrow/Lance datasets.
 
 Javelin is a Rust-based command-line and TUI tool for inspecting datasets stored in the Lance format (and compatible Parquet exports). It focuses on fast, ergonomic exploration of embedding-like matrices, sparse COO data, and 1D vectors using an interactive terminal UI built on `ratatui` and `crossterm`. Next step: graph visualisations, please star ⭐ the repo.
 
-Download one of the pre-built packages.
+Download one of the pre-built packages in [Releases](https://github.com/tuned-org-uk/javelin-tui/releases).
 
 Compile with `cargo`:
 ```bash
 cargo install javelin-tui
 ```
+
+---
+## Usage
+
+### Basic CLI
+
+```
+# Print schema and statistics
+javelin --filepath /path/to/dataset.lance stats
+
+# Show the first 20 rows
+javelin --filepath /path/to/dataset.lance head --n 20
+
+# Randomly sample 50 rows, preserving original indices
+javelin --filepath /path/to/dataset.lance sample --n 50
+
+# Open full dataset in TUI viewer
+javelin --filepath /path/to/dataset.lance display
+```
+
+### TUI launcher (default)
+
+```
+# Launcher for a directory of Lance datasets
+javelin --filepath /path/to/dir
+```
+
+If you omit the subcommand:
+
+- When `filepath` is a directory, the launcher scans it for `.lance` files.
+- When `filepath` is a file, you can still use the launcher to choose a command.
+
+#### Launcher key bindings
+
+- **Up / Down** or **k / j**: Move selection between files.
+- **Left / Right** or **h / l**: Cycle between commands (Head, Sample, Display, …).
+- **Enter**: Run the selected command on the selected file.
+- **q / Esc**: Exit the launcher.
 
 ---
 
@@ -95,7 +178,7 @@ If no subcommand is provided, the default is the TUI launcher.
 
 ---
 
-## Installation
+## Build from source
 
 ### Prerequisites
 
@@ -114,52 +197,6 @@ The binary will be available at:
 ```
 target/release/javelin
 ```
-
----
-
-## Usage
-
-### Basic CLI
-
-```
-
-# Print schema and statistics
-javelin --filepath /path/to/dataset.lance stats
-
-# Show the first 20 rows in the TUI viewer
-javelin --filepath /path/to/dataset.lance head --n 20
-
-# Randomly sample 50 rows, preserving original indices, and open in TUI
-javelin --filepath /path/to/dataset.lance sample --n 50
-
-# Open full dataset in TUI viewer
-javelin --filepath /path/to/dataset.lance display
-```
-
-### TUI launcher (default)
-
-```
-# Launcher for a directory of Lance datasets
-javelin --filepath /path/to/dir
-```
-
-If you omit the subcommand:
-
-- When `filepath` is a directory, the launcher scans it for `.lance` files.
-- When `filepath` is a file, you can still use the launcher to choose a command.
-
-#### Launcher key bindings
-
-- **Up / Down** or **k / j**: Move selection between files.
-- **Left / Right** or **h / l**: Cycle between commands (Head, Sample, Display, …).
-- **Enter**: Run the selected command on the selected file.
-- **q / Esc**: Exit the launcher.
-
-When you press **Enter**:
-
-- The launcher tears down its own TUI.
-- Runs the chosen command (e.g. display, sample) on the chosen file.
-- Restores the launcher when the command’s viewer exits.
 
 ---
 
