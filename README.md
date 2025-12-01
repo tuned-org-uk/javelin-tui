@@ -1,11 +1,11 @@
-#           _     ___ __      __ ______  _       _____  _   _                                                          
-#          | |   /   \\ \    / /|  ____|| |     |_   _|| \ | |                                                         
-#          | |  /  ^  \\ \  / / | |__   | |       | |  |  \| |                                                         
-#      _   | | /  /_\  \\ \/ /  |  __|  | |       | |  | . ` |                                                         
-#     | |__| |/  _____  \\  /   | |____ | |____  _| |_ | |\  |                                                         
-#      \____//__/     \__\\/    |______||______||_____||_| \_|                                                         
-#            |__|     |__|                                                                                             
-                                                                                                                   
+           _     ___ __      __ ______  _       _____  _   _                                                          
+          | |   /   \\ \    / /|  ____|| |     |_   _|| \ | |                                                         
+          | |  /  ^  \\ \  / / | |__   | |       | |  |  \| |                                                         
+      _   | | /  /_\  \\ \/ /  |  __|  | |       | |  | . ` |                                                         
+     | |__| |/  _____  \\  /   | |____ | |____  _| |_ | |\  |                                                         
+      \____//__/     \__\\/    |______||______||_____||_| \_|                                                         
+            |__|     |__|                                                                                             
+                                                                                                                
 #                                
 #    vector  space  visualisation
 #                                                                                                                             
@@ -13,7 +13,7 @@
                                                                                                                       
 Lance inspector and TUI for Arrow/Lance datasets.
 
-Javelin is a Rust-based command-line and TUI tool for inspecting datasets stored in the Lance format (and compatible Parquet exports). It focuses on fast, ergonomic exploration of embedding-like matrices, sparse COO data, and 1D vectors using an interactive terminal UI built on `ratatui` and `crossterm`.
+Javelin is a Rust-based command-line and TUI tool for inspecting datasets stored in the Lance format (and compatible Parquet exports). It focuses on fast, ergonomic exploration of embedding-like matrices, sparse COO data, and 1D vectors using an interactive terminal UI built on `ratatui` and `crossterm`. Next step: graph visualisations, please star  the repo.
 
 Installation:
 ```bash
@@ -110,7 +110,6 @@ cargo build --release
 ```
 
 The binary will be available at:
-
 ```
 target/release/javelin
 ```

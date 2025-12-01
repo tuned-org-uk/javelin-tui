@@ -1,26 +1,31 @@
-name: CI
+name: CI & Release Binaries
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
 jobs:
-  tests:
+  build-and-test:
     runs-on: "${{ matrix.platform.os }}-latest"
     strategy:
+      fail-fast: false
       matrix:
         platform:
           [
-            { os: "windows", target: "x86_64-pc-windows-msvc" },
-            { os: "ubuntu", target: "x86_64-unknown-linux-gnu" },
-            { os: "macos", target: "aarch64-apple-darwin" },
+            { os: "windows", target: "x86_64-pc-windows-msvc", ext: ".exe" },
+            { os: "ubuntu", target: "x86_64-unknown-linux-gnu", ext: "" },
+            { os: "macos", target: "aarch64-apple-darwin", ext: "" },
           ]
     env:
       TZ: "/usr/share/zoneinfo/your/location"
+      BINARY_NAME: "javelin" # adjust if your binary name differs
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Cache .cargo and target
         uses: actions/cache@v4
         with:
@@ -30,13 +35,52 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.platform.target }}-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.platform.target }}-
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform.target }}
+
       - name: Stable Build with all features
-        run: cargo build --all-features --target ${{ matrix.platform.target }}
+        run: cargo build --release --all-features --target ${{ matrix.platform.target }}
+
       - name: Stable Build without features
-        run: cargo build --target ${{ matrix.platform.target }}
+        run: cargo build --release --target ${{ matrix.platform.target }}
+
       - name: Tests
         run: cargo test --all-features
+
+      - name: Prepare binary artifact
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.platform.target }}/release/${BINARY_NAME}${{ matrix.platform.ext }} \
+             artifacts/${BINARY_NAME}-${{ matrix.platform.target }}${{ matrix.platform.ext }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: javelin-${{ matrix.platform.target }}
+          path: artifacts/*
+
+  release-binaries:
+    name: Create GitHub Release with Binaries
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') # only on tagged pushes
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List downloaded artifacts
+        run: ls -R dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
