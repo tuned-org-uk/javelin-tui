@@ -24,15 +24,16 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "javelin", about = "Lance inspector")]
 pub struct Cli {
-    /// Path to the Lance file
+    /// Path to a lance file or directory
     #[arg(long)]
     pub filepath: PathBuf,
     #[command(subcommand)]
-    pub cmd: Command,
+    pub cmd: Option<Command>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
+    Tui,
     Info,
     Head { n: usize },
     Sample { n: usize },
@@ -46,6 +47,5 @@ pub enum Command {
     //     mode: String,
     // },
     // Clusters,
-    Tui,
     Display,
 }

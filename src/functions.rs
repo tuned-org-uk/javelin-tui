@@ -237,6 +237,11 @@ pub async fn cmd_display(filepath: &PathBuf) -> Result<()> {
 ///
 /// - supports all layouts; dense row‑major vectors are expanded before viewing.
 pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
+    use arrow::array::UInt32Array;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use rand::rng;
+    use rand::seq::SliceRandom;
+
     info!(
         "cmd_sample: requested {} random rows from {:?}",
         n_rows, filepath
@@ -250,7 +255,7 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
 
     let dataset = Dataset::open(&uri).await?;
 
-    // Count total rows once up front; this hits metadata and is cheap.
+    // Count total rows once up front.
     let total_rows = dataset.count_rows(None).await?;
     info!("cmd_sample: dataset has {} rows", total_rows);
 
@@ -259,33 +264,24 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
         return Ok(());
     }
 
-    // Defensive check: n_rows must not exceed the dataset length.
-    // Using assert! here will panic in debug; you may prefer a fallible check.
-    assert!(
-        total_rows >= n_rows,
-        "n_rows exceeds dataset length: {} > {}",
-        n_rows,
-        total_rows
-    );
-
-    // Clamp requested rows to dataset size (in case of equality).
+    // Clamp requested rows to dataset size.
     let n = n_rows.min(total_rows);
     info!("cmd_sample: effective sample size {}", n);
 
-    // Generate a vector of row indices [0, total_rows) and shuffle in place.
-    let mut rng = rand::rng();
+    // Generate and shuffle indices [0, total_rows).
+    let mut rng = rng();
     let mut indices: Vec<i64> = (0..total_rows as i64).collect();
     indices.shuffle(&mut rng);
     indices.truncate(n);
-    indices.sort_unstable(); // important so max_index is last
+    indices.sort_unstable(); // so max_index is last
+
     debug!(
         "cmd_sample: first 10 sampled indices: {:?}",
         &indices[..indices.len().min(10)]
     );
     println!("Sampling {} rows from {} total", indices.len(), total_rows);
 
-    // For simplicity, read a contiguous prefix [0, max_index] as a batch,
-    // then use Arrow `take` to gather only the sampled indices.
+    // Read prefix [0, max_index] as a batch, then gather only sampled rows.
     let max_index = *indices.last().unwrap();
     debug!(
         "cmd_sample: max sampled index {}, reading prefix [0, {}]",
@@ -309,7 +305,7 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
         return Ok(());
     }
 
-    // Build an Arrow index array to "take" the sampled rows from the prefix batch.
+    // Build an Arrow index array to take the sampled rows from the prefix batch.
     let index_array = Arc::new(arrow::array::Int64Array::from(indices.clone())) as ArrayRef;
     let mut sampled_columns = Vec::with_capacity(batch.num_columns());
 
@@ -319,7 +315,25 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
         sampled_columns.push(Arc::from(taken));
     }
 
-    let sampled_batch = RecordBatch::try_new(batch.schema(), sampled_columns)?;
+    // Add explicit original row index column as first column.
+    let original_idx_array =
+        UInt32Array::from(indices.iter().map(|&i| i as u32).collect::<Vec<u32>>());
+    let original_idx_col: ArrayRef = Arc::new(original_idx_array);
+
+    let old_schema = batch.schema();
+    let mut new_fields: Vec<Field> = Vec::with_capacity(old_schema.fields().len() + 1);
+    new_fields.push(Field::new("row_idx", DataType::UInt32, false));
+    for f in old_schema.fields() {
+        // f: &Arc<Field> -> &Field via Deref, then clone Field
+        new_fields.push((**f).clone());
+    }
+    let new_schema = Arc::new(Schema::new(new_fields));
+
+    let mut new_columns = Vec::with_capacity(sampled_columns.len() + 1);
+    new_columns.push(original_idx_col);
+    new_columns.extend(sampled_columns);
+
+    let sampled_batch = RecordBatch::try_new(new_schema, new_columns)?;
     info!(
         "cmd_sample: built sampled batch with {} rows × {} cols",
         sampled_batch.num_rows(),
@@ -332,7 +346,6 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
     }
 
     let sampled_batch = normalize_for_display(&sampled_batch)?;
-    // Hand off to the interactive spreadsheet viewer.
     debug!("cmd_sample: launching interactive viewer for sampled batch");
     display_spreadsheet_interactive(&sampled_batch)?;
     Ok(())
@@ -395,7 +408,7 @@ fn cmd_clusters(filepath: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_tui(filepath: PathBuf) -> Result<()> {
+pub async fn run_tui(root: PathBuf) -> Result<()> {
     use crossterm::{
         ExecutableCommand,
         event::{self, Event, KeyCode},
@@ -405,11 +418,54 @@ pub async fn run_tui(filepath: PathBuf) -> Result<()> {
         Terminal,
         backend::CrosstermBackend,
         layout::{Constraint, Direction, Layout},
-        widgets::{Block, Borders, Paragraph},
+        style::{Color, Modifier, Style},
+        widgets::{Block, Borders, List, ListItem, Paragraph},
     };
+    use std::fs;
     use std::io::stdout;
 
-    // Setup terminal
+    // 1. Check directory and collect .lance children
+    if !root.is_dir() {
+        return Err(anyhow::anyhow!(format!(
+            "Path is not a directory: {:?}",
+            root
+        )));
+    }
+
+    let mut entries: Vec<PathBuf> = fs::read_dir(&root)
+        .map_err(|e| anyhow::anyhow!(format!("Failed to read dir {:?}: {}", root, e)))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("lance"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    entries.sort();
+
+    if entries.is_empty() {
+        return Err(anyhow::anyhow!(format!(
+            "No .lance files found in directory {:?}",
+            root
+        )));
+    }
+
+    // Commands we support from TUI
+    #[derive(Clone, Copy)]
+    enum TuiCommand {
+        Head,
+        Sample,
+        Display,
+    }
+    let commands = [TuiCommand::Head, TuiCommand::Sample, TuiCommand::Display];
+
+    let mut selected_file_idx: usize = 0;
+    let mut selected_cmd_idx: usize = 0;
+
+    // 2. Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout());
@@ -418,32 +474,141 @@ pub async fn run_tui(filepath: PathBuf) -> Result<()> {
     loop {
         terminal.draw(|frame| {
             let size = frame.area();
-
-            // Simple layout: header + content
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(3), // title
+                    Constraint::Min(5),    // file list
+                    Constraint::Length(5), // command selector
+                ])
                 .split(size);
 
             // Header
             let header = Paragraph::new(format!(
-                "Javelin - Lance Inspector\nFile: {}",
-                filepath.display()
+                "Javelin - Lance Inspector\nDirectory: {}",
+                root.display()
             ))
-            .block(Block::default().borders(Borders::ALL).title("Info"));
+            .block(Block::default().borders(Borders::ALL).title(" Info "));
             frame.render_widget(header, chunks[0]);
 
-            // Content area
-            let content = Paragraph::new("Press 'q' to quit\nTUI content would go here")
-                .block(Block::default().borders(Borders::ALL).title("Content"));
-            frame.render_widget(content, chunks[1]);
+            // File list
+            let items: Vec<ListItem> = entries
+                .iter()
+                .map(|p| {
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("<?>");
+                    ListItem::new(name.to_string())
+                })
+                .collect();
+
+            let file_list = List::new(items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Lance files "),
+                )
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol(">> ");
+
+            frame.render_stateful_widget(
+                file_list,
+                chunks[1],
+                &mut ratatui::widgets::ListState::default().with_selected(Some(selected_file_idx)),
+            );
+
+            // Command chooser
+            let cmd_labels: Vec<&str> = commands
+                .iter()
+                .map(|c| match c {
+                    TuiCommand::Head => "Head",
+                    TuiCommand::Sample => "Sample",
+                    TuiCommand::Display => "Display",
+                })
+                .collect();
+
+            let mut cmd_spans = String::new();
+            for (i, label) in cmd_labels.iter().enumerate() {
+                if i == selected_cmd_idx {
+                    cmd_spans.push_str(&format!("[{}]  ", label));
+                } else {
+                    cmd_spans.push_str(&format!(" {}   ", label));
+                }
+            }
+
+            let cmd_para = Paragraph::new(cmd_spans)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Command (←/→ to change, Enter to run, q to quit) "),
+                )
+                .style(Style::default().fg(Color::White));
+
+            frame.render_widget(cmd_para, chunks[2]);
         })?;
 
-        // Handle events
+        // Handle input
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('q') {
-                    break;
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        break;
+                    }
+                    // File selection up/down
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if selected_file_idx > 0 {
+                            selected_file_idx -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if selected_file_idx + 1 < entries.len() {
+                            selected_file_idx += 1;
+                        }
+                    }
+                    // Command selection left/right
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        if selected_cmd_idx > 0 {
+                            selected_cmd_idx -= 1;
+                        }
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        if selected_cmd_idx + 1 < commands.len() {
+                            selected_cmd_idx += 1;
+                        }
+                    }
+                    // Enter: run selected command on selected file
+                    KeyCode::Enter => {
+                        let file = entries[selected_file_idx].clone();
+                        let cmd = commands[selected_cmd_idx];
+
+                        // Leave current TUI before launching nested viewer
+                        disable_raw_mode()?;
+                        terminal.backend_mut().execute(LeaveAlternateScreen)?;
+                        terminal.show_cursor()?;
+
+                        // Reuse existing async command functions
+                        match cmd {
+                            TuiCommand::Head => {
+                                // default n=20 for example; you can tune or prompt later
+                                cmd_head(&file, 20).await?;
+                            }
+                            TuiCommand::Sample => {
+                                cmd_sample(&file, 20).await?;
+                            }
+                            TuiCommand::Display => {
+                                cmd_display(&file).await?;
+                            }
+                        }
+
+                        // Re-enter launcher TUI after the viewer exits
+                        enable_raw_mode()?;
+                        stdout().execute(EnterAlternateScreen)?;
+                        let backend = CrosstermBackend::new(stdout());
+                        terminal = Terminal::new(backend)?;
+                    }
+                    _ => {}
                 }
             }
         }
