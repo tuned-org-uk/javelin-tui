@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use arrow::datatypes::DataType;
-use arrow_array::{ArrayRef, Float64Array, RecordBatch, UInt32Array};
+use arrow_array::{Float64Array, RecordBatch, UInt32Array};
 use ratatui::text::Span;
 use ratatui::{
     Frame,

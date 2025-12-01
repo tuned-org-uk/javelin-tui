@@ -1,4 +1,3 @@
-use anyhow::Result;
 use arrow::array::*;
 use arrow::datatypes::DataType;
 use arrow_array::{ArrayRef, RecordBatch};
