@@ -1,11 +1,11 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use arrow_array::{Float64Array, RecordBatch, UInt32Array};
 use ratatui::text::Span;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
+    Frame,
 };
 
 /// Render one frame for a COO (row, col, value) sparse matrix:

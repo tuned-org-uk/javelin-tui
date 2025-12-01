@@ -3,10 +3,10 @@ use arrow::datatypes::DataType;
 use arrow_array::{ArrayRef, RecordBatch};
 use ratatui::text::Span;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
+    Frame,
 };
 
 /// Render one frame of the transposed F×N view (features × rows).

@@ -1,15 +1,18 @@
 name: CI & Release Binaries
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
 
 jobs:
   build-and-test:
     runs-on: "${{ matrix.platform.os }}-latest"
+    if: github.actor != 'dependabot[bot]'
     strategy:
       fail-fast: false
       matrix:
@@ -53,13 +56,11 @@ jobs:
       - name: Stable Build with all features
         run: cargo build --release --all-features --target ${{ matrix.platform.target }}
 
-      - name: Stable Build without features
-        run: cargo build --release --target ${{ matrix.platform.target }}
-
       - name: Tests
-        run: cargo test --all-features
+        run: cargo test --all-features --lib
 
       - name: Prepare binary artifact
+        shell: bash
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.platform.target }}/release/${BINARY_NAME}${{ matrix.platform.ext }} \
@@ -75,20 +76,61 @@ jobs:
     name: Create GitHub Release with Binaries
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') # only on tagged pushes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if Cargo.toml version changed
+        id: versioncheck
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Extract current version from Cargo.toml
+          CURRENT_VERSION=$(grep '^version' Cargo.toml | head -n1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "current-version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Get previous commit on main (if any) and read its Cargo.toml
+          PREV_VERSION=""
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            if git show HEAD^:Cargo.toml >/tmp/Cargo_prev.toml 2>/dev/null; then
+              PREV_VERSION=$(grep '^version' /tmp/Cargo_prev.toml | head -n1 | sed 's/.*"\(.*\)".*/\1/' || true)
+            fi
+          fi
+
+          echo "previous-version=$PREV_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Current version:  $CURRENT_VERSION"
+          echo "Previous version: $PREV_VERSION"
+
+          if [ "$CURRENT_VERSION" = "$PREV_VERSION" ]; then
+            echo "Version unchanged; skipping release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version changed; proceeding with release."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download all artifacts
+        if: steps.versioncheck.outputs.release == 'true'
         uses: actions/download-artifact@v4
         with:
           path: dist
 
       - name: List downloaded artifacts
+        if: steps.versioncheck.outputs.release == 'true'
         run: ls -R dist
 
       - name: Create GitHub Release
+        if: steps.versioncheck.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.versioncheck.outputs.current-version }}
+          name: v${{ steps.versioncheck.outputs.current-version }}
           files: |
             dist/**/*
         env:

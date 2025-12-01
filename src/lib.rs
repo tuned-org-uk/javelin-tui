@@ -4,6 +4,9 @@ pub mod display_coo;
 pub mod display_transposed;
 pub mod functions;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Once;
 
 static INIT: Once = Once::new();
