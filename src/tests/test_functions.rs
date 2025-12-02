@@ -1,5 +1,9 @@
 use crate::functions::*;
 
+use genegraph_storage::lance::LanceStorage;
+use genegraph_storage::traits::StorageBackend;
+use smartcore::linalg::basic::arrays::Array;
+use std::fs;
 use std::path::PathBuf;
 
 // Helper: resolve a path relative to project root for test data.
@@ -88,5 +92,74 @@ async fn run_tui_returns_ok_for_directory() {
     assert!(
         result.is_ok(),
         "run_tui should return Ok for a valid directory: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn cmd_generate_creates_expected_artifacts() {
+    use crate::datasets::remove_directory_if_exists;
+    // Use a small dataset so the test is fast.
+    const N_ITEMS: usize = 20;
+    const N_DIMS: usize = 5;
+    const SEED: u64 = 42;
+
+    // 1. Create a temporary output directory under target/
+    let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let name_id = "javelin_test";
+    out_dir.push(name_id);
+
+    remove_directory_if_exists(PathBuf::from(out_dir.clone()).as_path()).unwrap();
+
+    // 2. Call cmd_generate
+    cmd_generate(N_ITEMS, N_DIMS, SEED)
+        .await
+        .expect("cmd_generate should succeed");
+
+    // 3. Verify that storage can be opened and metadata exists
+    let storage = LanceStorage::new(
+        out_dir.to_str().expect("non-UTF8 test path").to_string(),
+        "javelin_test".to_string(),
+    );
+
+    // Metadata file must exist and be readable
+    let md = storage
+        .load_metadata()
+        .await
+        .expect("metadata should be loadable after cmd_generate");
+    assert!(
+        !md.files.is_empty(),
+        "metadata should contain at least one file entry"
+    );
+
+    // 4. Check dense matrix ("raw_input")
+    let dense = storage
+        .load_dense("raw_input")
+        .await
+        .expect("raw_input dense matrix should be loadable");
+    let (rows, cols) = dense.shape();
+    assert_eq!(rows, N_ITEMS, "dense rows should match N_ITEMS");
+    assert_eq!(
+        cols, N_DIMS,
+        "dense cols should match N_ITEMS (by construction)"
+    );
+
+    // 5. Check sparse adjacency matrix ("adjacency")
+    let adj = storage
+        .load_sparse("adjacency")
+        .await
+        .expect("adjacency sparse matrix should be loadable");
+    assert_eq!(adj.rows(), N_ITEMS, "adjacency rows should match N_ITEMS");
+    assert_eq!(adj.cols(), N_ITEMS, "adjacency cols should match N_ITEMS");
+    assert!(adj.nnz() > 0, "adjacency matrix should have non-zeros");
+
+    // 6. Check generic vector ("norms")
+    let norms = storage
+        .load_vector("norms")
+        .await
+        .expect("norms vector should be loadable");
+    assert_eq!(
+        norms.len(),
+        N_ITEMS,
+        "norms vector length should match N_ITEMS"
     );
 }

@@ -14,6 +14,7 @@ enum AppError {
     Stats(Error),
     Display(Error),
     Tui(Error),
+    Generate(Error),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -47,6 +48,13 @@ fn main() -> anyhow::Result<()> {
         Command::Display => rt
             .block_on(async { cmd_display(&filepath).await })
             .map_err(AppError::Display),
+        Command::Generate {
+            n_items,
+            n_dims,
+            seed,
+        } => rt
+            .block_on(async { cmd_generate(n_items, n_dims, seed).await })
+            .map_err(AppError::Generate),
     };
 
     if let Err(e) = result {

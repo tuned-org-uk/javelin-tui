@@ -1,3 +1,4 @@
+pub mod datasets;
 pub mod display;
 pub mod display_1d;
 pub mod display_coo;
@@ -38,8 +39,12 @@ pub struct Cli {
 pub enum Command {
     Tui,
     Info,
-    Head { n: usize },
-    Sample { n: usize },
+    Head {
+        n: usize,
+    },
+    Sample {
+        n: usize,
+    },
     Stats,
     // PlotLambdas {
     //     #[arg(long, default_value = "64")]
@@ -51,4 +56,12 @@ pub enum Command {
     // },
     // Clusters,
     Display,
+    Generate {
+        #[arg(long, default_value = "200")]
+        n_items: usize,
+        #[arg(long, default_value = "300")]
+        n_dims: usize,
+        #[arg(long, default_value = "42")]
+        seed: u64,
+    },
 }
