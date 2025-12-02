@@ -1,14 +1,14 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use arrow_array::{Float64Array, RecordBatch, UInt32Array};
 use ratatui::text::Span;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
-    Frame,
 };
 
-/// Render one frame for a COO (row, col, value) sparse matrix:
+/// Render one frame for a COO (row, col, value) sparse matrix.
 ///
 /// Layout:
 ///   ┌───────────────────────────────────────────────┐
@@ -19,7 +19,8 @@ use ratatui::{
 ///   │ Diagonals / connectivity summary              │
 ///   └───────────────────────────────────────────────┘
 ///
-/// `triple_offset` controls vertical scrolling in the triples table.
+/// `triple_offset` controls vertical scrolling in the triples table
+/// and the visible row band in the sparsity map.
 pub fn render_coo_ui(f: &mut Frame, batch: &RecordBatch, triple_offset: usize) {
     // Extract COO components and basic stats.
     let coo = match CooView::from_batch(batch) {
@@ -72,7 +73,7 @@ pub fn render_coo_ui(f: &mut Frame, batch: &RecordBatch, triple_offset: usize) {
         .split(outer[1]);
 
     render_triples_table(f, &coo, triple_offset, middle[0]);
-    render_sparsity_map(f, &coo, middle[1]);
+    render_sparsity_map(f, &coo, middle[1], triple_offset);
 
     // --- Bottom: diagonals + connectivity summary ---------------------------
     let diag_summary = summarize_diagonals(&coo, 6);
@@ -264,7 +265,12 @@ fn render_triples_table<'a>(
 
 // ========================= Sparsity map panel ===============================
 
-fn render_sparsity_map<'a>(f: &mut Frame, coo: &CooView<'a>, area: ratatui::prelude::Rect) {
+fn render_sparsity_map<'a>(
+    f: &mut Frame,
+    coo: &CooView<'a>,
+    area: ratatui::prelude::Rect,
+    triple_offset: usize,
+) {
     let inner_width = area.width.saturating_sub(2) as usize;
     let inner_height = area.height.saturating_sub(2) as usize;
     if inner_width == 0 || inner_height == 0 || coo.n_rows == 0 || coo.n_cols == 0 {
@@ -274,9 +280,19 @@ fn render_sparsity_map<'a>(f: &mut Frame, coo: &CooView<'a>, area: ratatui::prel
         return;
     }
 
-    // Limit resolution for very large matrices.
+    // Increased resolution for taller grids; capped to avoid huge buffers.
     let grid_w = inner_width.min(64);
-    let grid_h = inner_height.min(32);
+    let grid_h = inner_height.min(128);
+
+    // Derive a visible row window from triple_offset.
+    // Simple heuristic: interpret triple_offset as an approximate starting row.
+    let mut row_start = triple_offset.min(coo.n_rows.saturating_sub(1));
+    let mut row_end = (row_start + grid_h).min(coo.n_rows);
+    if row_end == row_start {
+        row_start = 0;
+        row_end = coo.n_rows.min(grid_h);
+    }
+    let visible_rows = row_end - row_start;
 
     let mut grid = vec![vec!['.'; grid_w]; grid_h];
 
@@ -286,10 +302,16 @@ fn render_sparsity_map<'a>(f: &mut Frame, coo: &CooView<'a>, area: ratatui::prel
         if r >= coo.n_rows || c >= coo.n_cols {
             continue;
         }
+        // Only plot entries in the visible row band.
+        if r < row_start || r >= row_end {
+            continue;
+        }
 
-        let gr = r * grid_h / coo.n_rows;
+        let gr = (r - row_start) * grid_h / visible_rows.max(1);
         let gc = c * grid_w / coo.n_cols;
-        grid[gr][gc] = '*';
+        if gr < grid_h && gc < grid_w {
+            grid[gr][gc] = '*';
+        }
     }
 
     let mut lines = String::new();
@@ -301,8 +323,12 @@ fn render_sparsity_map<'a>(f: &mut Frame, coo: &CooView<'a>, area: ratatui::prel
     }
 
     let title = format!(
-        " Sparsity pattern ({}×{} → {}×{}) ",
-        coo.n_rows, coo.n_cols, grid_h, grid_w
+        " Sparsity rows {}–{} of {} (cols 0–{} of {}) ",
+        row_start,
+        row_end.saturating_sub(1),
+        coo.n_rows,
+        coo.n_cols.saturating_sub(1),
+        coo.n_cols
     );
 
     let para = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
