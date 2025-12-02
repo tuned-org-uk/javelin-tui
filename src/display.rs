@@ -1,19 +1,19 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use arrow::array::*;
 use arrow::datatypes::DataType;
 use arrow_array::{ArrayRef, RecordBatch};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::text::Span;
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
-    Frame, Terminal,
 };
 use std::io;
 
@@ -57,7 +57,7 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     // Discover all feature columns once (col_*)
     let all_col_indices = collect_feature_cols(batch)?;
     info!(
-        "display_spreadsheet_interactive: found {} feature columns (col_*)",
+        "display_spreadsheet_interactive: found {} feature columns",
         all_col_indices.len()
     );
 

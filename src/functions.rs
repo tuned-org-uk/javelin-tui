@@ -627,9 +627,7 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
     use genegraph_storage::lance::LanceStorage;
     use genegraph_storage::metadata::GeneMetadata;
     use genegraph_storage::traits::StorageBackend;
-    use smartcore::linalg::basic::arrays::Array;
     use smartcore::linalg::basic::matrix::DenseMatrix;
-    use sprs::TriMat;
 
     // 1) Prepare storage directory and minimal metadata
     let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -684,11 +682,14 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
     // Fill any required fields on md.aspace_config, etc.
     storage.save_metadata(&md).await?;
 
-    println!(
+    info!(
         "Generated example datasets in {:?}:
-  - dense Lance:   {} rows × {} cols (raw_input)",
+  - dense Lance:   {} rows × {} cols (raw_input)
+  - sparse Lance:  (adjacency)
+  - 1D vector Lance: (norms)",
         out_dir, nitems, nfeatures,
     );
+    info!("Try now `javelin --filepath ./javelin_test`");
 
     Ok(())
 }

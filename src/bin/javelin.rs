@@ -1,4 +1,4 @@
-use anyhow::{Error, Result};
+use anyhow::{Error, Result, anyhow};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
 
@@ -17,12 +17,27 @@ enum AppError {
     Generate(Error),
 }
 
+use std::fmt;
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::Info(e) => write!(f, "info command failed: {e}"),
+            AppError::Head(e) => write!(f, "head command failed: {e}"),
+            AppError::Sample(e) => write!(f, "sample command failed: {e}"),
+            AppError::Stats(e) => write!(f, "stats command failed: {e}"),
+            AppError::Display(e) => write!(f, "display command failed: {e}"),
+            AppError::Tui(e) => write!(f, "tui command failed: {e}"),
+            AppError::Generate(e) => write!(f, "generate command failed: {e}"),
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     use std::process::exit;
 
     javelin_tui::init();
     let args = Cli::parse();
-    let filepath = args.filepath;
 
     let rt = Runtime::new().expect("failed to create Tokio runtime");
 
@@ -31,29 +46,62 @@ fn main() -> anyhow::Result<()> {
 
     let result = match cmd {
         Command::Info => rt
-            .block_on(async { cmd_info(&filepath).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                cmd_info(&filepath).await
+            })
             .map_err(AppError::Info),
         Command::Head { n } => rt
-            .block_on(async { cmd_head(&filepath, n).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                cmd_head(&filepath, n).await
+            })
             .map_err(AppError::Head),
         Command::Sample { n } => rt
-            .block_on(async { cmd_sample(&filepath, n).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                cmd_sample(&filepath, n).await
+            })
             .map_err(AppError::Sample),
         Command::Stats => rt
-            .block_on(async { cmd_stats(&filepath).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                cmd_stats(&filepath).await
+            })
             .map_err(AppError::Stats),
         Command::Tui => rt
-            .block_on(async { run_tui(filepath).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                run_tui(filepath).await
+            })
             .map_err(AppError::Tui),
         Command::Display => rt
-            .block_on(async { cmd_display(&filepath).await })
+            .block_on(async {
+                let filepath = args
+                    .filepath
+                    .ok_or_else(|| anyhow!("--filepath is required for this command"))?;
+                cmd_display(&filepath).await
+            })
             .map_err(AppError::Display),
         Command::Generate {
             n_items,
             n_dims,
             seed,
         } => rt
-            .block_on(async { cmd_generate(n_items, n_dims, seed).await })
+            .block_on(async {
+                println!("Generating sample dataset in ./test_javelin");
+                cmd_generate(n_items, n_dims, seed).await
+            })
             .map_err(AppError::Generate),
     };
 

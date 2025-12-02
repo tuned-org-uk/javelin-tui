@@ -26,11 +26,14 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "javelin", about = "Lance inspector")]
+#[command(
+    name = "javelin",
+    about = "Display and work with Lance files in the CLI"
+)]
 pub struct Cli {
     /// Path to a lance file or directory
     #[arg(long)]
-    pub filepath: PathBuf,
+    pub filepath: Option<PathBuf>,
     #[command(subcommand)]
     pub cmd: Option<Command>,
 }
