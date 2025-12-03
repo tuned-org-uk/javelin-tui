@@ -17,8 +17,8 @@ use ratatui::{
 };
 use std::io;
 
-use crate::{
-    display_1d::render_1d_ui, display_transposed::render_transposed_ui, functions::LanceLayout,
+use crate::display::{
+    LanceLayout, display_1d::render_1d_ui, display_transposed::render_transposed_ui,
 };
 
 // === Public entry point =====================================================
@@ -34,12 +34,12 @@ use crate::{
 /// - opens a ratatui / crossterm alternate screen,
 /// - lets the user scroll horizontally over feature columns,
 /// - and exits when the user presses `q` or `Esc`.
-pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
+pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     use log::{debug, info};
 
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
-    let layout = crate::functions::detect_lance_layout(batch);
+    let layout = crate::functions::functions::detect_lance_layout(batch);
 
     info!(
         "display_spreadsheet_interactive: starting viewer for batch (rows={}, cols={})",
@@ -80,7 +80,9 @@ pub fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
 
     loop {
         terminal.draw(|f| match layout {
-            LanceLayout::SparseCoo => crate::display_coo::render_coo_ui(f, batch, row_start),
+            LanceLayout::SparseCoo => {
+                crate::display::display_coo::render_coo_ui(f, batch, row_start)
+            }
             LanceLayout::Vector1D => {
                 render_1d_ui(
                     f,

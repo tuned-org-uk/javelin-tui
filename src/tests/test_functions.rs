@@ -1,9 +1,10 @@
-use crate::functions::*;
+use crate::functions::{
+    generate::cmd_generate, head::cmd_head, sample::cmd_sample, stats::cmd_stats, tui::run_tui,
+};
 
 use genegraph_storage::lance::LanceStorage;
 use genegraph_storage::traits::StorageBackend;
 use smartcore::linalg::basic::arrays::Array;
-use std::fs;
 use std::path::PathBuf;
 
 // Helper: resolve a path relative to project root for test data.

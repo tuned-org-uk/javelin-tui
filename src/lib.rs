@@ -1,8 +1,5 @@
 pub mod datasets;
 pub mod display;
-pub mod display_1d;
-pub mod display_coo;
-pub mod display_transposed;
 pub mod functions;
 
 #[cfg(test)]

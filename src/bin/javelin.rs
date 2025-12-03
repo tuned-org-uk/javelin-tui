@@ -1,8 +1,11 @@
-use anyhow::{Error, Result, anyhow};
-use clap::{Parser, Subcommand};
+use anyhow::{Error, anyhow};
+use clap::Parser;
 use tokio::runtime::Runtime;
 
-use javelin_tui::functions::*;
+use javelin_tui::functions::{
+    display::cmd_display, generate::cmd_generate, head::cmd_head, info::cmd_info,
+    sample::cmd_sample, stats::cmd_stats, tui::run_tui,
+};
 use javelin_tui::{Cli, Command};
 
 #[derive(Debug)]
