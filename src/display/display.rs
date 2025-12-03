@@ -17,37 +17,8 @@ use ratatui::{
 };
 use std::io;
 
-use crate::display::{
-    LanceLayout, display_1d::render_1d_ui, display_transposed::render_transposed_ui,
-};
-
-// === Color Definitions =====================================================
-
-// Alternating row background colors
-const EVEN_ROW_BG: Color = Color::Rgb(40, 42, 54);
-const ODD_ROW_BG: Color = Color::Rgb(50, 52, 64);
-
-// Alternating column background colors
-const EVEN_COL_BG: Color = Color::Rgb(44, 46, 58);
-const ODD_COL_BG: Color = Color::Rgb(54, 56, 68);
-
-// Header colors
-const HEADER_FG: Color = Color::Rgb(255, 184, 108); // Warm orange
-const HEADER_BG: Color = Color::Rgb(68, 71, 90);
-
-// Text colors
-const TEXT_PRIMARY: Color = Color::Rgb(248, 248, 242); // Off-white
-const TEXT_SECONDARY: Color = Color::Rgb(139, 233, 253); // Cyan
-const TEXT_ACCENT: Color = Color::Rgb(80, 250, 123); // Green
-
-// Border colors
-const BORDER_PRIMARY: Color = Color::Rgb(98, 114, 164); // Blue-purple
-const BORDER_ACCENT: Color = Color::Rgb(139, 233, 253); // Cyan
-
-// Sparse visualization colors
-const SPARSE_ASTERISK: Color = Color::Rgb(255, 121, 198); // Hot pink
-const SPARSE_DOT: Color = Color::Rgb(68, 71, 90); // Dark gray
-const SPARSE_BORDER: Color = Color::Rgb(80, 250, 123); // Green
+use crate::display::*;
+use crate::display::{display_1d::render_1d_ui, display_transposed::render_transposed_ui};
 
 // === Public entry point =====================================================
 
@@ -292,7 +263,7 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
 
 // === Formatting helpers =====================================================
 
-fn format_value(array: &ArrayRef, row_idx: usize) -> String {
+pub(crate) fn format_value(array: &ArrayRef, row_idx: usize) -> String {
     if array.is_null(row_idx) {
         return "NULL".to_string();
     }
@@ -342,7 +313,7 @@ fn format_value(array: &ArrayRef, row_idx: usize) -> String {
 // === Color helpers =========================================================
 
 /// Blend two RGB colors by averaging their components
-fn blend_colors(c1: Color, c2: Color) -> Color {
+pub(crate) fn blend_colors(c1: Color, c2: Color) -> Color {
     match (c1, c2) {
         (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => Color::Rgb(
             ((r1 as u16 + r2 as u16) / 2) as u8,
@@ -354,7 +325,7 @@ fn blend_colors(c1: Color, c2: Color) -> Color {
 }
 
 /// Get the background color for a cell based on row and column index
-fn get_cell_bg_color(row_idx: usize, col_idx: usize) -> Color {
+pub(crate) fn get_cell_bg_color(row_idx: usize, col_idx: usize) -> Color {
     let row_bg = if row_idx % 2 == 0 {
         EVEN_ROW_BG
     } else {
