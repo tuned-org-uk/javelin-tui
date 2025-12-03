@@ -155,15 +155,21 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
                     }
 
                     KeyCode::Char('t') => {
-                        if let LanceLayout::SparseCoo = layout {
-                            transposed = !transposed;
-                            col_offset = 0;
-                            row_offset = 0;
-                            row_start = 0;
-                            info!(
-                                "display_spreadsheet_interactive: toggle transpose -> mode={} (N×F=false,F×N=true)",
-                                transposed
-                            );
+                        // Transpose only for dense layouts
+                        match layout {
+                            LanceLayout::DenseRowMajor | LanceLayout::Other => {
+                                transposed = !transposed;
+                                col_offset = 0;
+                                row_offset = 0;
+                                row_start = 0;
+                                info!(
+                                    "display_spreadsheet_interactive: toggle transpose -> mode={} (N×F=false,F×N=true)",
+                                    transposed
+                                );
+                            }
+                            _ => {
+                                // SparseCoo and Vector1D don't support transpose
+                            }
                         }
                     }
 
