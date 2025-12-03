@@ -13,7 +13,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 use std::io;
 
@@ -21,19 +21,36 @@ use crate::display::{
     LanceLayout, display_1d::render_1d_ui, display_transposed::render_transposed_ui,
 };
 
+// === Color Definitions =====================================================
+
+// Alternating row background colors
+const EVEN_ROW_BG: Color = Color::Rgb(40, 42, 54);
+const ODD_ROW_BG: Color = Color::Rgb(50, 52, 64);
+
+// Alternating column background colors
+const EVEN_COL_BG: Color = Color::Rgb(44, 46, 58);
+const ODD_COL_BG: Color = Color::Rgb(54, 56, 68);
+
+// Header colors
+const HEADER_FG: Color = Color::Rgb(255, 184, 108); // Warm orange
+const HEADER_BG: Color = Color::Rgb(68, 71, 90);
+
+// Text colors
+const TEXT_PRIMARY: Color = Color::Rgb(248, 248, 242); // Off-white
+const TEXT_SECONDARY: Color = Color::Rgb(139, 233, 253); // Cyan
+const TEXT_ACCENT: Color = Color::Rgb(80, 250, 123); // Green
+
+// Border colors
+const BORDER_PRIMARY: Color = Color::Rgb(98, 114, 164); // Blue-purple
+const BORDER_ACCENT: Color = Color::Rgb(139, 233, 253); // Cyan
+
+// Sparse visualization colors
+const SPARSE_ASTERISK: Color = Color::Rgb(255, 121, 198); // Hot pink
+const SPARSE_DOT: Color = Color::Rgb(68, 71, 90); // Dark gray
+const SPARSE_BORDER: Color = Color::Rgb(80, 250, 123); // Green
+
 // === Public entry point =====================================================
 
-/// Launch an interactive spreadsheet-like TUI for a Lance `RecordBatch`.
-///
-/// # Arguments
-/// * `batch` - Arrow `RecordBatch` containing a header row with metadata
-///   (`name_id`, `n_rows`, `n_cols`) and feature columns named `col_*`.
-///
-/// The function:
-/// - scans the schema once to find all feature columns (`col_*`),
-/// - opens a ratatui / crossterm alternate screen,
-/// - lets the user scroll horizontally over feature columns,
-/// - and exits when the user presses `q` or `Esc`.
 pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()> {
     use log::{debug, info};
 
@@ -275,16 +292,6 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
 
 // === Formatting helpers =====================================================
 
-/// Format a single value from an Arrow array at the given row index as a string.
-///
-/// # Arguments
-/// * `array` - Arrow `ArrayRef` representing one column.
-/// * `row_idx` - Zero-based row index to read from `array`.
-///
-/// The function:
-/// - handles basic numeric, boolean, and UTF-8 string types,
-/// - returns `"NULL"` for null entries,
-/// - truncates long UTF-8 strings to 10 characters with an ellipsis.
 fn format_value(array: &ArrayRef, row_idx: usize) -> String {
     if array.is_null(row_idx) {
         return "NULL".to_string();
@@ -332,18 +339,37 @@ fn format_value(array: &ArrayRef, row_idx: usize) -> String {
     }
 }
 
+// === Color helpers =========================================================
+
+/// Blend two RGB colors by averaging their components
+fn blend_colors(c1: Color, c2: Color) -> Color {
+    match (c1, c2) {
+        (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => Color::Rgb(
+            ((r1 as u16 + r2 as u16) / 2) as u8,
+            ((g1 as u16 + g2 as u16) / 2) as u8,
+            ((b1 as u16 + b2 as u16) / 2) as u8,
+        ),
+        _ => c1,
+    }
+}
+
+/// Get the background color for a cell based on row and column index
+fn get_cell_bg_color(row_idx: usize, col_idx: usize) -> Color {
+    let row_bg = if row_idx % 2 == 0 {
+        EVEN_ROW_BG
+    } else {
+        ODD_ROW_BG
+    };
+    let col_bg = if col_idx % 2 == 0 {
+        EVEN_COL_BG
+    } else {
+        ODD_COL_BG
+    };
+    blend_colors(row_bg, col_bg)
+}
+
 // === Column selection / windows ============================================
 
-/// Collect the indices of all feature columns used by the viewer.
-///
-/// Primary mode:
-///   - columns whose names start with `col_` (dense feature matrices).
-///
-/// Fallbacks when no `col_*` columns exist:
-///   - if there is exactly one column, treat it as a single feature
-///     (1D vectors like lambdas, centroid_map, norms, etc.);
-///   - otherwise, treat all numeric columns as features
-///     (e.g. sparse COO {row, col, value}).
 fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
     let schema = batch.schema();
 
@@ -370,8 +396,7 @@ fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
         return Ok(vec![0]);
     }
 
-    // 3) Fallback for generic numeric tables (e.g. sparse COO row/col/value):
-    //    use all numeric columns as features.
+    // 3) Fallback for generic numeric tables
     cols = schema
         .fields()
         .iter()
@@ -402,15 +427,6 @@ fn collect_feature_cols(batch: &RecordBatch) -> Result<Vec<usize>> {
     Ok(cols)
 }
 
-/// Compute a sliding window over the feature column indices for horizontal scrolling.
-///
-/// # Arguments
-/// * `all_cols` - Slice of all `col_*` indices in schema order.
-/// * `col_offset` - Current horizontal offset (starting column in `all_cols`).
-/// * `visible_cols` - Maximum number of feature columns that can be shown.
-///
-/// # Returns
-/// A subslice of `all_cols` representing the currently visible feature columns.
 fn feature_window<'a>(
     all_cols: &'a [usize],
     col_offset: usize,
@@ -423,51 +439,65 @@ fn feature_window<'a>(
 
 // === Header / rows =========================================================
 
-/// Build the table header row for the current feature window.
-///
-/// # Arguments
-/// * `batch` - Arrow `RecordBatch` providing schema information for column names.
-/// * `col_window` - Slice of feature column indices to display.
-///
-/// The header contains:
-/// - a leading `"Row"` column,
-/// - one column per `col_*` feature in `col_window`,
-/// - two trailing columns `"avg"` and `"std"` for per-row statistics.
-fn render_header<'a>(batch: &'a RecordBatch, col_window: &'a [usize]) -> Row<'a> {
+fn render_header<'a>(
+    batch: &'a RecordBatch,
+    col_window: &'a [usize],
+    col_offset: usize,
+) -> Row<'a> {
     let schema = batch.schema();
-    let mut header_cells = vec!["Row".to_string()];
-    for &i in col_window {
-        header_cells.push(schema.field(i).name().to_string());
-    }
-    header_cells.push("avg".to_string());
-    header_cells.push("std".to_string());
 
-    Row::new(header_cells)
-        .style(
+    // Row index header with special styling
+    let mut header_cells = vec![
+        Cell::from("Row").style(
             Style::default()
-                .fg(Color::Yellow)
+                .fg(HEADER_FG)
+                .bg(HEADER_BG)
                 .add_modifier(Modifier::BOLD),
-        )
-        .height(1)
+        ),
+    ];
+
+    // Feature column headers with alternating colors
+    for (display_idx, &schema_idx) in col_window.iter().enumerate() {
+        let col_bg = if (col_offset + display_idx) % 2 == 0 {
+            blend_colors(HEADER_BG, EVEN_COL_BG)
+        } else {
+            blend_colors(HEADER_BG, ODD_COL_BG)
+        };
+
+        let cell = Cell::from(schema.field(schema_idx).name().to_string());
+        header_cells.push(
+            cell.style(
+                Style::default()
+                    .fg(HEADER_FG)
+                    .bg(col_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
+    }
+
+    // Stats headers with accent color
+    header_cells.push(
+        Cell::from("avg").style(
+            Style::default()
+                .fg(TEXT_ACCENT)
+                .bg(HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+    header_cells.push(
+        Cell::from("std").style(
+            Style::default()
+                .fg(TEXT_ACCENT)
+                .bg(HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+
+    Row::new(header_cells).height(1)
 }
 
 // === UI ====================================================================
 
-/// Render the full TUI layout for a single frame.
-///
-/// # Arguments
-/// * `f` - Mutable ratatui `Frame` used for drawing widgets.
-/// * `batch` - Arrow `RecordBatch` backing the table view.
-/// * `all_col_indices` - Slice of all `col_*` feature column indices.
-/// * `col_offset` - Current horizontal offset into `all_col_indices`.
-/// * `visible_cols` - Maximum number of feature columns to show at once.
-/// * `num_rows` - Total number of rows in `batch`.
-/// * `num_cols` - Total number of columns in `batch` (including metadata).
-///
-/// Layout:
-/// - Top: metadata block showing `name_id`, `n_rows`, `n_cols` (if available).
-/// - Middle: main table with row id, feature columns, and avg/std per row.
-/// - Bottom: status bar with dimensions and key bindings.
 fn render_base_ui(
     f: &mut Frame,
     batch: &RecordBatch,
@@ -478,7 +508,6 @@ fn render_base_ui(
     num_cols: usize,
     row_start: usize,
 ) {
-    // 1) Split into metadata / table / status, same as transposed
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -490,7 +519,7 @@ fn render_base_ui(
 
     let schema = batch.schema();
 
-    // ---- Metadata header (same logic you already use in transposed) ----
+    // metadata row with color
     let mut name_idx = None;
     let mut n_rows_idx = None;
     let mut n_cols_idx = None;
@@ -516,21 +545,32 @@ fn render_base_ui(
         format!("rows: {num_rows}    cols: {num_cols}")
     };
 
-    let header_paragraph = Paragraph::new(Span::raw(meta_text))
-        .block(Block::default().borders(Borders::ALL).title(" Metadata "));
+    let header_paragraph =
+        Paragraph::new(Span::styled(meta_text, Style::default().fg(TEXT_SECONDARY))).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_ACCENT))
+                .title(" Metadata "),
+        );
     f.render_widget(header_paragraph, chunks[0]);
 
-    // ---- Determine vertical window for table rows based on chunks[1].height ----
-    let table_area_height = chunks[1].height.saturating_sub(3); // header row + borders
+    // table window size
+    let table_area_height = chunks[1].height.saturating_sub(3);
     let max_visible_rows = table_area_height as usize;
     let end_row = (row_start + max_visible_rows).min(num_rows);
 
-    // ---- Horizontal window over features, as before ----
+    // horizontal feature window
     let col_window = feature_window(all_col_indices, col_offset, visible_cols);
-    let header_row = render_header(batch, col_window);
+    let header_row = render_header(batch, col_window, col_offset);
 
-    // Render only rows [row_start, end_row)
-    let rows = render_rows_window(batch, col_window, all_col_indices, row_start, end_row);
+    let rows = render_rows_window(
+        batch,
+        col_window,
+        all_col_indices,
+        row_start,
+        end_row,
+        col_offset,
+    );
 
     let mut widths = vec![Constraint::Length(5)]; // "Row" column
     for _ in col_window {
@@ -559,17 +599,24 @@ fn render_base_ui(
 
     let table = Table::new(rows, widths)
         .header(header_row)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_PRIMARY))
+                .title(title),
+        )
         .column_spacing(1);
 
     f.render_widget(table, chunks[1]);
 
-    // ---- Status bar at bottom ----
     let status = format!(
         " {} rows × {} total cols | {} feature cols (col_*) | mode: N×F | ↑↓ scroll rows | ←→ scroll features | t transpose | q quit ",
         num_rows, num_cols, total_feat_cols
     );
-    let status_widget = Block::default().borders(Borders::ALL).title(status);
+    let status_widget = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER_ACCENT))
+        .title(Span::styled(status, Style::default().fg(TEXT_ACCENT)));
     f.render_widget(status_widget, chunks[2]);
 }
 
@@ -579,20 +626,37 @@ fn render_rows_window<'a>(
     all_cols: &'a [usize],
     row_start: usize,
     row_end: usize,
+    col_offset: usize,
 ) -> Vec<Row<'a>> {
     let mut out = Vec::with_capacity(row_end.saturating_sub(row_start));
 
     for row_idx in row_start..row_end {
-        let mut cells = vec![row_idx.to_string()];
+        let row_bg = if row_idx % 2 == 0 {
+            EVEN_ROW_BG
+        } else {
+            ODD_ROW_BG
+        };
 
-        // visible feature values
-        for &col_idx in col_window {
+        // Row index cell
+        let mut cells = vec![
+            Cell::from(row_idx.to_string()).style(
+                Style::default()
+                    .fg(TEXT_SECONDARY)
+                    .bg(row_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        // Feature value cells with alternating column colors
+        for (display_idx, &col_idx) in col_window.iter().enumerate() {
             let col = batch.column(col_idx);
             let s = format_value(col, row_idx);
-            cells.push(s);
+            let cell_bg = get_cell_bg_color(row_idx, col_offset + display_idx);
+
+            cells.push(Cell::from(s).style(Style::default().fg(TEXT_PRIMARY).bg(cell_bg)));
         }
 
-        // stats over ALL features (unchanged from your existing render_rows)
+        // Calculate stats over all features
         let mut vals: Vec<f64> = Vec::with_capacity(all_cols.len());
         for &col_idx in all_cols {
             let col = batch.column(col_idx);
@@ -639,8 +703,9 @@ fn render_rows_window<'a>(
             (format!("{:.4}", mean), format!("{:.4}", std))
         };
 
-        cells.push(avg_str);
-        cells.push(std_str);
+        // Stats cells with accent color
+        cells.push(Cell::from(avg_str).style(Style::default().fg(TEXT_ACCENT).bg(row_bg)));
+        cells.push(Cell::from(std_str).style(Style::default().fg(TEXT_ACCENT).bg(row_bg)));
 
         out.push(Row::new(cells).height(1));
     }
