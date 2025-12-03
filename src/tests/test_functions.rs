@@ -110,6 +110,8 @@ async fn cmd_generate_creates_expected_artifacts() {
 
     // 2. Verify that storage can be opened and metadata exists
     let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    out_dir.push("target");
+    out_dir.push("debug");
     out_dir.push("javelin_test");
     let uri = crate::datasets::path_to_uri(&out_dir);
 
@@ -156,4 +158,7 @@ async fn cmd_generate_creates_expected_artifacts() {
         N_ITEMS,
         "norms vector length should match N_ITEMS"
     );
+
+    // tear down
+    std::fs::remove_dir_all(&out_dir).unwrap();
 }

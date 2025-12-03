@@ -1,6 +1,6 @@
 use arrow::array::*;
 use arrow::datatypes::DataType;
-use arrow_array::{ArrayRef, RecordBatch};
+use arrow_array::RecordBatch;
 use ratatui::text::Span;
 use ratatui::{
     Frame,

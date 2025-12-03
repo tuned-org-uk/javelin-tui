@@ -58,6 +58,7 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
     let mut col_offset: usize = 0; // horizontal scroll over features (N×F)
     let mut row_offset: usize = 0; // horizontal scroll over rows (F×N)
     let mut row_start: usize = 0; // vertical scroll (top visible row / feature)
+    let mut sparse_col_offset: usize = 0; // NEW: horizontal scroll for sparse COO matrix
     let visible: usize = 8; // number of visible items horizontally
     let mut transposed = false; // false = N×F, true = F×N
 
@@ -69,7 +70,7 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
     loop {
         terminal.draw(|f| match layout {
             LanceLayout::SparseCoo => {
-                crate::display::display_coo::render_coo_ui(f, batch, row_start)
+                crate::display::display_coo::render_coo_ui(f, batch, row_start, sparse_col_offset)
             }
             LanceLayout::Vector1D => {
                 render_1d_ui(
@@ -111,7 +112,11 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
         })?;
 
         // clamp horizontal offsets
-        if transposed {
+        if let LanceLayout::SparseCoo = layout {
+            // For sparse COO, get the matrix dimensions to clamp properly
+            // You may need to extract this info or pass it from render_coo_ui
+            // For now, we'll handle it in the key event section
+        } else if transposed {
             let max_row_off = num_rows.saturating_sub(visible);
             if row_offset > max_row_off {
                 debug!(
@@ -150,19 +155,28 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
                     }
 
                     KeyCode::Char('t') => {
-                        transposed = !transposed;
-                        col_offset = 0;
-                        row_offset = 0;
-                        row_start = 0;
-                        info!(
-                            "display_spreadsheet_interactive: toggle transpose -> mode={} (N×F=false,F×N=true)",
-                            transposed
-                        );
+                        if let LanceLayout::SparseCoo = layout {
+                            transposed = !transposed;
+                            col_offset = 0;
+                            row_offset = 0;
+                            row_start = 0;
+                            info!(
+                                "display_spreadsheet_interactive: toggle transpose -> mode={} (N×F=false,F×N=true)",
+                                transposed
+                            );
+                        }
                     }
 
                     // horizontal right
                     KeyCode::Right | KeyCode::Char('l') => {
-                        if transposed {
+                        if let LanceLayout::SparseCoo = layout {
+                            // Horizontal scroll for sparse matrix columns
+                            sparse_col_offset += 1;
+                            debug!(
+                                "display_spreadsheet_interactive: sparse_col_offset -> {} (→)",
+                                sparse_col_offset
+                            );
+                        } else if transposed {
                             let max = num_rows.saturating_sub(visible);
                             if row_offset < max {
                                 row_offset += 1;
@@ -185,7 +199,16 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
 
                     // horizontal left
                     KeyCode::Left | KeyCode::Char('h') => {
-                        if transposed {
+                        if let LanceLayout::SparseCoo = layout {
+                            // Horizontal scroll for sparse matrix columns
+                            if sparse_col_offset > 0 {
+                                sparse_col_offset -= 1;
+                                debug!(
+                                    "display_spreadsheet_interactive: sparse_col_offset -> {} (←)",
+                                    sparse_col_offset
+                                );
+                            }
+                        } else if transposed {
                             if row_offset > 0 {
                                 row_offset -= 1;
                                 debug!(
@@ -204,7 +227,10 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
 
                     // jump first/last horizontally
                     KeyCode::Char('H') => {
-                        if transposed {
+                        if let LanceLayout::SparseCoo = layout {
+                            sparse_col_offset = 0;
+                            debug!("display_spreadsheet_interactive: sparse_col_offset -> 0 (H)");
+                        } else if transposed {
                             row_offset = 0;
                             debug!("display_spreadsheet_interactive: row_offset -> 0 (H)");
                         } else {
@@ -213,7 +239,11 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
                         }
                     }
                     KeyCode::Char('E') => {
-                        if transposed {
+                        if let LanceLayout::SparseCoo = layout {
+                            // Jump to end - will be clamped in render function
+                            sparse_col_offset = usize::MAX;
+                            debug!("display_spreadsheet_interactive: sparse_col_offset -> MAX (E)");
+                        } else if transposed {
                             row_offset = num_rows.saturating_sub(visible);
                             debug!(
                                 "display_spreadsheet_interactive: row_offset -> {} (E)",

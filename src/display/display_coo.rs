@@ -5,8 +5,11 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    text::Line,
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
+
+use crate::display::*;
 
 /// Render one frame for a COO (row, col, value) sparse matrix.
 ///
@@ -21,13 +24,26 @@ use ratatui::{
 ///
 /// `triple_offset` controls vertical scrolling in the triples table
 /// and the visible row band in the sparsity map.
-pub fn render_coo_ui(f: &mut Frame, batch: &RecordBatch, triple_offset: usize) {
+pub(crate) fn render_coo_ui(
+    f: &mut Frame,
+    batch: &RecordBatch,
+    triple_offset: usize,
+    col_offset: usize,
+) {
     // Extract COO components and basic stats.
     let coo = match CooView::from_batch(batch) {
         Ok(c) => c,
         Err(e) => {
-            let p = Paragraph::new(Span::raw(format!("Invalid COO dataset: {e}")))
-                .block(Block::default().borders(Borders::ALL).title(" Error "));
+            let p = Paragraph::new(Span::styled(
+                format!("Invalid COO dataset: {e}"),
+                Style::default().fg(Color::Red),
+            ))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Red))
+                    .title(" Error "),
+            );
             f.render_widget(p, f.area());
             return;
         }
@@ -59,29 +75,35 @@ pub fn render_coo_ui(f: &mut Frame, batch: &RecordBatch, triple_offset: usize) {
         }
     );
 
-    let meta = Paragraph::new(Span::raw(meta_text)).block(
+    let meta = Paragraph::new(Span::styled(meta_text, Style::default().fg(TEXT_SECONDARY))).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" COO Metadata "),
+            .border_style(Style::default().fg(BORDER_ACCENT))
+            .title(" Sparse Representation "),
     );
     f.render_widget(meta, outer[0]);
 
     // --- Middle: left triples table, right sparsity map ----------------------
     let middle = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(outer[1]);
 
     render_triples_table(f, &coo, triple_offset, middle[0]);
-    render_sparsity_map(f, &coo, middle[1], triple_offset);
+    render_sparsity_map(f, &coo, middle[1], triple_offset, col_offset);
 
     // --- Bottom: diagonals + connectivity summary ---------------------------
     let diag_summary = summarize_diagonals(&coo, 6);
     let conn_summary = summarize_connectivity(&coo, 6);
 
     let summary_text = format!("{diag_summary}\n{conn_summary}");
-    let summary = Paragraph::new(summary_text)
-        .block(Block::default().borders(Borders::ALL).title(" Structure "));
+    let summary = Paragraph::new(Span::styled(summary_text, Style::default().fg(TEXT_ACCENT)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_PRIMARY))
+                .title(" Structure "),
+        );
     f.render_widget(summary, outer[2]);
 }
 
@@ -219,30 +241,64 @@ fn render_triples_table<'a>(
     let start = triple_offset.min(coo.nnz);
     let end = (start + max_visible).min(coo.nnz);
 
-    let header = Row::new(vec!["idx", "row", "col", "value"])
-        .style(
+    // Header with color
+    let header = Row::new(vec![
+        // Cell::from("idx").style(
+        //     Style::default()
+        //         .fg(HEADER_FG)
+        //         .bg(HEADER_BG)
+        //         .add_modifier(Modifier::BOLD),
+        // ),
+        Cell::from("row").style(
             Style::default()
-                .fg(Color::Yellow)
+                .fg(HEADER_FG)
+                .bg(HEADER_BG)
                 .add_modifier(Modifier::BOLD),
-        )
-        .height(1);
+        ),
+        Cell::from("col").style(
+            Style::default()
+                .fg(HEADER_FG)
+                .bg(HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("value").style(
+            Style::default()
+                .fg(HEADER_FG)
+                .bg(HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
+    .height(1);
 
+    // Rows with alternating colors
     let mut rows_ui = Vec::with_capacity(end.saturating_sub(start));
     for i in start..end {
         let r = coo.row.value(i);
         let c = coo.col.value(i);
         let v = coo.val.value(i);
+
+        let row_bg = if (i - start) % 2 == 0 {
+            EVEN_ROW_BG
+        } else {
+            ODD_ROW_BG
+        };
+
         let cells = vec![
-            format!("{i}"),
-            format!("{r}"),
-            format!("{c}"),
-            format!("{:.4}", v),
+            // Cell::from(format!("{i}")).style(
+            //     Style::default()
+            //         .fg(TEXT_SECONDARY)
+            //         .bg(row_bg)
+            //         .add_modifier(Modifier::BOLD),
+            // ),
+            Cell::from(format!("{r}")).style(Style::default().fg(TEXT_PRIMARY).bg(row_bg)),
+            Cell::from(format!("{c}")).style(Style::default().fg(TEXT_PRIMARY).bg(row_bg)),
+            Cell::from(format!("{:.4}", v)).style(Style::default().fg(TEXT_PRIMARY).bg(row_bg)),
         ];
         rows_ui.push(Row::new(cells).height(1));
     }
 
     let widths = vec![
-        Constraint::Length(6),
+        // Constraint::Length(6),
         Constraint::Length(8),
         Constraint::Length(8),
         Constraint::Length(14),
@@ -257,7 +313,12 @@ fn render_triples_table<'a>(
 
     let table = Table::new(rows_ui, widths)
         .header(header)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BORDER_PRIMARY))
+                .title(title),
+        )
         .column_spacing(1);
 
     f.render_widget(table, area);
@@ -270,6 +331,7 @@ fn render_sparsity_map<'a>(
     coo: &CooView<'a>,
     area: ratatui::prelude::Rect,
     triple_offset: usize,
+    col_offset: usize,
 ) {
     let inner_width = area.width.saturating_sub(2) as usize;
     let inner_height = area.height.saturating_sub(2) as usize;
@@ -280,58 +342,69 @@ fn render_sparsity_map<'a>(
         return;
     }
 
-    // Increased resolution for taller grids; capped to avoid huge buffers.
-    let grid_w = inner_width.min(64);
-    let grid_h = inner_height.min(128);
-
-    // Derive a visible row window from triple_offset.
-    // Simple heuristic: interpret triple_offset as an approximate starting row.
-    let mut row_start = triple_offset.min(coo.n_rows.saturating_sub(1));
-    let mut row_end = (row_start + grid_h).min(coo.n_rows);
-    if row_end == row_start {
-        row_start = 0;
-        row_end = coo.n_rows.min(grid_h);
-    }
+    // Determine visible row window
+    let row_start = triple_offset.min(coo.n_rows.saturating_sub(1));
+    let row_end = (row_start + inner_height).min(coo.n_rows);
     let visible_rows = row_end - row_start;
 
-    let mut grid = vec![vec!['.'; grid_w]; grid_h];
+    // Determine visible column window with horizontal scrolling
+    let col_start = col_offset.min(coo.n_cols.saturating_sub(1));
+    let col_end = (col_start + inner_width).min(coo.n_cols);
+    let visible_cols = col_end - col_start;
 
+    // Create grid with 1:1 mapping (no downsampling)
+    let mut grid = vec![vec![false; visible_cols]; visible_rows];
+
+    // Map each non-zero entry to the grid with 1:1 mapping
     for i in 0..coo.nnz {
         let r = coo.row.value(i) as usize;
         let c = coo.col.value(i) as usize;
-        if r >= coo.n_rows || c >= coo.n_cols {
-            continue;
-        }
-        // Only plot entries in the visible row band.
-        if r < row_start || r >= row_end {
-            continue;
-        }
 
-        let gr = (r - row_start) * grid_h / visible_rows.max(1);
-        let gc = c * grid_w / coo.n_cols;
-        if gr < grid_h && gc < grid_w {
-            grid[gr][gc] = '*';
+        // Check if this entry is in the visible window
+        if r >= row_start && r < row_end && c >= col_start && c < col_end {
+            let gr = r - row_start;
+            let gc = c - col_start;
+            if gr < visible_rows && gc < visible_cols {
+                grid[gr][gc] = true;
+            }
         }
     }
 
-    let mut lines = String::new();
+    // Build colored text with asterisks and dots
+    let mut lines = Vec::new();
     for row in &grid {
-        for ch in row {
-            lines.push(*ch);
+        let mut spans = Vec::new();
+        for &has_value in row {
+            if has_value {
+                spans.push(Span::styled(
+                    "*",
+                    Style::default()
+                        .fg(SPARSE_ASTERISK)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled("·", Style::default().fg(SPARSE_DOT)));
+            }
         }
-        lines.push('\n');
+        lines.push(Line::from(spans));
     }
 
     let title = format!(
-        " Sparsity rows {}–{} of {} (cols 0–{} of {}) ",
+        " Sparsity rows {}–{} of {}, cols {}–{} of {} (←→ to scroll cols) ",
         row_start,
         row_end.saturating_sub(1),
         coo.n_rows,
-        coo.n_cols.saturating_sub(1),
+        col_start,
+        col_end.saturating_sub(1),
         coo.n_cols
     );
 
-    let para = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BORDER_ACCENT))
+            .title(title),
+    );
     f.render_widget(para, area);
 }
 

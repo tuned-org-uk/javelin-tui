@@ -108,6 +108,7 @@ pub(crate) fn normalize_for_display(batch: &RecordBatch) -> Result<RecordBatch> 
     }
 }
 
+#[allow(dead_code)]
 fn cmd_clusters(filepath: &PathBuf) -> Result<()> {
     println!("=== Cluster Information ===");
     println!("Filepath: {}", filepath.display());

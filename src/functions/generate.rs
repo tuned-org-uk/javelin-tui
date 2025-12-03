@@ -11,9 +11,22 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
     use smartcore::linalg::basic::matrix::DenseMatrix;
 
     // 1) Prepare storage directory and minimal metadata
-    let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let name_id = "javelin_test";
-    out_dir.push(name_id);
+    #[cfg(test)]
+    fn prepare_dir(n_id: &str) -> PathBuf {
+        let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        out_dir.push("target");
+        out_dir.push("debug");
+        out_dir.push(n_id);
+        out_dir
+    }
+    #[cfg(not(test))]
+    fn prepare_dir(n_id: &str) -> PathBuf {
+        let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        out_dir.push(n_id);
+        out_dir
+    }
+    let out_dir = prepare_dir(name_id);
     if out_dir.exists() {
         std::fs::remove_dir_all(&out_dir).unwrap();
     }
