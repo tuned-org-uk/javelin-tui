@@ -16,7 +16,7 @@ fn test_data_path(name: &str) -> PathBuf {
     p
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cmd_stats_runs_on_valid_lance() {
     // Requires a small valid Lance dataset in tests/data/sample.lance
     let path = test_data_path("sample.lance");
@@ -33,7 +33,7 @@ async fn cmd_stats_runs_on_valid_lance() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cmd_head_handles_empty_or_small_dataset() {
     let path = test_data_path("sample.lance");
     if !path.exists() {
@@ -52,7 +52,7 @@ async fn cmd_head_handles_empty_or_small_dataset() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cmd_sample_produces_at_most_n_rows() {
     let path = test_data_path("sample.lance");
     if !path.exists() {
@@ -69,7 +69,7 @@ async fn cmd_sample_produces_at_most_n_rows() {
     assert!(result.is_ok(), "cmd_sample should succeed: {result:?}");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn run_tui_returns_ok_for_directory() {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // Assuming root has at least one `.lance` for manual / CI tests,
@@ -95,31 +95,24 @@ async fn run_tui_returns_ok_for_directory() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cmd_generate_creates_expected_artifacts() {
-    use crate::datasets::remove_directory_if_exists;
     // Use a small dataset so the test is fast.
     const N_ITEMS: usize = 20;
     const N_DIMS: usize = 5;
     const SEED: u64 = 42;
 
-    // 1. Create a temporary output directory under target/
-    let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let name_id = "javelin_test";
-    out_dir.push(name_id);
-
-    remove_directory_if_exists(PathBuf::from(out_dir.clone()).as_path()).unwrap();
-
-    // 2. Call cmd_generate
+    // 1. Call cmd_generate
     cmd_generate(N_ITEMS, N_DIMS, SEED)
         .await
         .expect("cmd_generate should succeed");
 
-    // 3. Verify that storage can be opened and metadata exists
-    let storage = LanceStorage::new(
-        out_dir.to_str().expect("non-UTF8 test path").to_string(),
-        "javelin_test".to_string(),
-    );
+    // 2. Verify that storage can be opened and metadata exists
+    let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    out_dir.push("javelin_test");
+    let uri = crate::datasets::path_to_uri(&out_dir);
+
+    let storage = LanceStorage::new(uri, "javelin_test".to_string());
 
     // Metadata file must exist and be readable
     let md = storage

@@ -69,6 +69,28 @@ cargo install javelin-tui
 ---
 ## Usage
 
+## Quickstart
+
+```
+# generate a toy dataset
+javelin generate
+
+# load the dataset in the tui
+javeling --filepath ./javelin_test
+
+# Select one of the supported files types
+- Dense
+- Sparse (COO, like adjacency matrices)
+- 1D vectors (i.e. norms)
+
+# Explore the different modes
+[Head]
+[Sample]
+[Display]
+[T] Transpose
+[q] Exit
+```
+
 ### Basic CLI
 
 ```

@@ -11,6 +11,7 @@ use smartcore::linalg::basic::arrays::Array2;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::datasets::path_to_uri;
 use crate::display::*;
 
 /// Logical view of how a Lance dataset is stored.
@@ -131,7 +132,7 @@ pub async fn cmd_info(filepath: &PathBuf) -> Result<()> {
     println!("Path: {}", filepath.display());
 
     // Open the Lance dataset
-    let uri = format!("file://{}", filepath.canonicalize()?.display());
+    let uri = path_to_uri(filepath);
     let dataset = Dataset::open(&uri)
         .await
         .context("Failed to open Lance dataset")?;
@@ -175,7 +176,7 @@ fn cmd_files(filepath: &PathBuf) -> Result<()> {
 }
 
 pub async fn cmd_head(filepath: &PathBuf, n: usize) -> Result<()> {
-    let uri = format!("file://{}", filepath.canonicalize()?.display());
+    let uri = path_to_uri(filepath);
     let dataset = Dataset::open(&uri).await?;
     let mut scanner = dataset.scan();
 
@@ -198,7 +199,7 @@ pub async fn cmd_display(filepath: &PathBuf) -> Result<()> {
     info!("cmd_display: opening full dataset at {:?}", filepath);
 
     let abs = filepath.canonicalize()?;
-    let uri = format!("file://{}", abs.display());
+    let uri = path_to_uri(filepath);
     debug!("cmd_display: Lance URI = {}", uri);
 
     let dataset = Dataset::open(&uri).await?;
@@ -251,7 +252,7 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
 
     // Canonicalize the path so logs and Lance see a stable URI.
     let abs = filepath.canonicalize()?;
-    let uri = format!("file://{}", abs.display());
+    let uri = path_to_uri(filepath);
     debug!("cmd_sample: opening dataset at URI {}", uri);
 
     let dataset = Dataset::open(&uri).await?;
@@ -355,7 +356,7 @@ pub async fn cmd_sample(filepath: &PathBuf, n_rows: usize) -> Result<()> {
 pub async fn cmd_stats(filepath: &PathBuf) -> Result<()> {
     println!("=== Dataset Statistics ===");
 
-    let uri = format!("file://{}", filepath.canonicalize()?.display());
+    let uri = path_to_uri(filepath);
     let dataset = Dataset::open(&uri).await?;
     let schema = dataset.schema();
     let count = dataset.count_rows(None).await?;
@@ -623,7 +624,7 @@ pub async fn run_tui(root: PathBuf) -> Result<()> {
 
 /// Generate a toy dataset to showcase
 pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::Result<()> {
-    use crate::datasets::{make_gaussian_cliques_multi, remove_directory_if_exists};
+    use crate::datasets::make_gaussian_cliques_multi;
     use genegraph_storage::lance::LanceStorage;
     use genegraph_storage::metadata::GeneMetadata;
     use genegraph_storage::traits::StorageBackend;
@@ -633,11 +634,14 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
     let mut out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let name_id = "javelin_test";
     out_dir.push(name_id);
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
 
-    remove_directory_if_exists(PathBuf::from(out_dir.clone()).as_path())
-        .map_err(|e| StorageError::Io(e.to_string()))?;
-
-    let storage = LanceStorage::new(out_dir.to_string_lossy().to_string(), name_id.to_string());
+    let storage = LanceStorage::new(
+        out_dir.to_str().expect("non-UTF8 test path").to_string(),
+        "javelin_test".to_string(),
+    );
 
     // 2) Generate dense “full” dataset
     let (dense, sparse, vector) = make_gaussian_cliques_multi(n_items, 0.3, 5, n_dims, seed);
@@ -682,7 +686,7 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
     // Fill any required fields on md.aspace_config, etc.
     storage.save_metadata(&md).await?;
 
-    info!(
+    println!(
         "Generated example datasets in {:?}:
   - dense Lance:   {} rows × {} cols (raw_input)
   - sparse Lance:  (adjacency)

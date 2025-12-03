@@ -209,3 +209,23 @@ pub fn remove_directory_if_exists<P: AsRef<Path>>(path: P) -> io::Result<()> {
         Ok(())
     }
 }
+
+use std::path::PathBuf;
+
+/// Converts a full file path to a `file://` URI for Lance.
+pub fn path_to_uri(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else if path.is_relative() {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("/"))
+                    .join(path)
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+            }
+        })
+        .to_string_lossy()
+        .to_string()
+}
