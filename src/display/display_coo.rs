@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
 };
 
 use crate::display::*;
@@ -56,9 +56,9 @@ pub(crate) fn render_coo_ui(
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(4),
+            Constraint::Length(3), // Metadata header
+            Constraint::Min(0),    // Middle content (takes remaining space)
+            Constraint::Length(6), // Structure footer (2 border + 6 content lines)
         ])
         .split(f.area());
 
@@ -96,14 +96,27 @@ pub(crate) fn render_coo_ui(
     let diag_summary = summarize_diagonals(&coo, 6);
     let conn_summary = summarize_connectivity(&coo, 6);
 
-    let summary_text = format!("{diag_summary}\n{conn_summary}");
-    let summary = Paragraph::new(Span::styled(summary_text, Style::default().fg(TEXT_ACCENT)))
+    let summary_text = vec![
+        Line::from(diag_summary),
+        Line::from(conn_summary),
+        Line::from(Span::styled(
+            "Press 'v' for graph connectivity view",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::ITALIC),
+        )),
+    ];
+
+    let summary = Paragraph::new(summary_text)
+        .style(Style::default().fg(TEXT_ACCENT))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BORDER_PRIMARY))
                 .title(" Structure "),
-        );
+        )
+        .wrap(Wrap { trim: true });
+
     f.render_widget(summary, outer[2]);
 }
 

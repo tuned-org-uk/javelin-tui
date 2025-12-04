@@ -1,6 +1,7 @@
 pub(crate) mod display;
 pub(crate) mod display_1d;
 pub(crate) mod display_coo;
+pub(crate) mod display_sparse_viz;
 pub(crate) mod display_transposed;
 
 /// Logical view of how a Lance dataset is stored.

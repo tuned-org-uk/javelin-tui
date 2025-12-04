@@ -4,5 +4,6 @@ pub mod generate;
 pub mod head;
 pub mod info;
 pub mod sample;
+pub mod sparse_viz;
 pub mod stats;
 pub mod tui;

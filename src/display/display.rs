@@ -18,7 +18,10 @@ use ratatui::{
 use std::io;
 
 use crate::display::*;
-use crate::display::{display_1d::render_1d_ui, display_transposed::render_transposed_ui};
+use crate::display::{
+    display_1d::render_1d_ui, display_sparse_viz::display_connectivity_interactive,
+    display_transposed::render_transposed_ui,
+};
 
 // === Public entry point =====================================================
 
@@ -281,6 +284,36 @@ pub(crate) fn display_spreadsheet_interactive(batch: &RecordBatch) -> Result<()>
                                 "display_spreadsheet_interactive: row_start -> {} (↓/j)",
                                 row_start
                             );
+                        }
+                    }
+
+                    // Graph visualization mode (only for SparseCoo)
+                    KeyCode::Char('v') => {
+                        if let LanceLayout::SparseCoo = layout {
+                            info!("display_spreadsheet_interactive: entering graph view");
+
+                            // Temporarily exit terminal mode
+                            disable_raw_mode()?;
+                            execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+                            // Show connectivity visualization
+                            if let Err(e) =
+                                crate::display::display_sparse_viz::display_connectivity_interactive(
+                                    batch,
+                                )
+                            {
+                                eprintln!("Error displaying connectivity: {}", e);
+                            }
+
+                            // Re-enter terminal mode for COO view
+                            enable_raw_mode()?;
+                            execute!(io::stdout(), EnterAlternateScreen)?;
+
+                            // Recreate terminal
+                            let backend = CrosstermBackend::new(io::stdout());
+                            terminal = Terminal::new(backend)?;
+
+                            info!("display_spreadsheet_interactive: returned from graph view");
                         }
                     }
 
