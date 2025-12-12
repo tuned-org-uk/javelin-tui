@@ -24,10 +24,45 @@ jobs:
           ]
     env:
       TZ: "/usr/share/zoneinfo/your/location"
-      BINARY_NAME: "javelin" # adjust if your binary name differs
+      BINARY_NAME: "javelin"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free up disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          echo "============================================"
+          echo "Disk space before cleanup:"
+          echo "============================================"
+          df -h
+          echo ""
+          echo "Removing unnecessary packages and Docker images..."
+
+          # Remove large preinstalled packages
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/share/swift || true
+          sudo rm -rf /usr/local/.ghcup || true
+          sudo rm -rf /usr/lib/jvm || true
+
+          # Clean Docker resources
+          docker image prune -af || true
+          docker builder prune -af || true
+          docker system prune -af || true
+
+          # Clean apt cache
+          sudo apt-get clean || true
+          sudo apt-get autoremove -y || true
+
+          echo ""
+          echo "============================================"
+          echo "Disk space after cleanup:"
+          echo "============================================"
+          df -h
 
       - name: Setup Protobuf
         uses: arduino/setup-protoc@v3
@@ -39,9 +74,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo
-            ./target
-          key: ${{ runner.os }}-cargo-${{ matrix.platform.target }}-${{ hashFiles('**/Cargo.toml') }}
+            ~/.cargo/bin
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.platform.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.platform.target }}-
 
@@ -59,6 +97,17 @@ jobs:
       - name: Tests
         run: cargo test --all-features --lib
 
+      - name: Clean build artifacts (keep only binary)
+        shell: bash
+        run: |
+          # Remove intermediate build files but keep the final binary
+          find target/${{ matrix.platform.target }}/release -type f ! -name "${BINARY_NAME}*" -delete 2>/dev/null || true
+          find target/${{ matrix.platform.target }}/release/deps -type f -delete 2>/dev/null || true
+          find target/${{ matrix.platform.target }}/release/build -type d -exec rm -rf {} + 2>/dev/null || true
+
+          echo "Disk space after build cleanup:"
+          df -h
+
       - name: Prepare binary artifact
         shell: bash
         run: |
@@ -71,6 +120,7 @@ jobs:
         with:
           name: javelin-${{ matrix.platform.target }}
           path: artifacts/*
+          retention-days: 7
 
   release-binaries:
     name: Create GitHub Release with Binaries
