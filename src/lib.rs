@@ -23,10 +23,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(
-    name = "javelin",
-    about = "Display and work with Lance files in the CLI"
-)]
+#[command(name = "javelin", about = "Display and work with Lance matrices")]
 pub struct Cli {
     /// Path to a lance file or directory
     #[arg(long)]
@@ -46,15 +43,6 @@ pub enum Command {
         n: usize,
     },
     Stats,
-    // PlotLambdas {
-    //     #[arg(long, default_value = "64")]
-    //     bins: usize,
-    // },
-    // PlotLaplacian {
-    //     #[arg(long, default_value = "density")]
-    //     mode: String,
-    // },
-    // Clusters,
     Display,
     Generate {
         #[arg(long, default_value = "200")]

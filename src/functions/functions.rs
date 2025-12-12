@@ -107,14 +107,3 @@ pub(crate) fn normalize_for_display(batch: &RecordBatch) -> Result<RecordBatch> 
         LanceLayout::SparseCoo | LanceLayout::Vector1D | LanceLayout::Other => Ok(batch.clone()),
     }
 }
-
-#[allow(dead_code)]
-fn cmd_clusters(filepath: &PathBuf) -> Result<()> {
-    println!("=== Cluster Information ===");
-    println!("Filepath: {}", filepath.display());
-    println!("\n[Cluster visualization would appear here]");
-
-    // Example placeholder for future integration with ArrowSpace metadata.
-
-    Ok(())
-}

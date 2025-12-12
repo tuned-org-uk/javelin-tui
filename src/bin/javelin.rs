@@ -6,6 +6,10 @@ use javelin_tui::functions::{
     display::cmd_display, generate::cmd_generate, head::cmd_head, info::cmd_info,
     sample::cmd_sample, stats::cmd_stats, tui::run_tui,
 };
+
+// #[cfg(feature = "search")]
+// use javelin_tui::functions::{search::search_cmd, vector_space::vector_space_cmd};
+
 use javelin_tui::{Cli, Command};
 
 #[derive(Debug)]
@@ -18,6 +22,7 @@ enum AppError {
     Display(Error),
     Tui(Error),
     Generate(Error),
+    Other(Error),
 }
 
 use std::fmt;
@@ -32,6 +37,7 @@ impl fmt::Display for AppError {
             AppError::Display(e) => write!(f, "display command failed: {e}"),
             AppError::Tui(e) => write!(f, "tui command failed: {e}"),
             AppError::Generate(e) => write!(f, "generate command failed: {e}"),
+            AppError::Other(e) => write!(f, "command failed: {e}"),
         }
     }
 }

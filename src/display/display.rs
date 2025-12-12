@@ -18,10 +18,7 @@ use ratatui::{
 use std::io;
 
 use crate::display::*;
-use crate::display::{
-    display_1d::render_1d_ui, display_sparse_viz::display_connectivity_interactive,
-    display_transposed::render_transposed_ui,
-};
+use crate::display::{display_1d::render_1d_ui, display_transposed::render_transposed_ui};
 
 // === Public entry point =====================================================
 
