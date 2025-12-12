@@ -76,7 +76,7 @@ cargo install javelin-tui
 javelin generate
 
 # load the dataset in the tui
-javeling --filepath ./javelin_test
+javelin --filepath ./javelin_test
 
 # Select one of the supported files types
 - Dense
@@ -94,9 +94,6 @@ javeling --filepath ./javelin_test
 ### Basic CLI
 
 ```
-# Print schema and statistics
-javelin --filepath /path/to/dataset.lance stats
-
 # Show the first 20 rows
 javelin --filepath /path/to/dataset.lance head --n 20
 
