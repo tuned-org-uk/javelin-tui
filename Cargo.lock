@@ -2589,9 +2589,9 @@ dependencies = [
 
 [[package]]
 name = "genegraph-storage"
-version = "0.1.1"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ea4d21ca390dc9c45a8cb04ddfba53fb38c59267d17dad02e5ff85d199ad2f1"
+checksum = "28e040ba0dfc42308d830e624252a09d00f1a27971ea4a018501e2a56af73310"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -3153,7 +3153,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "javelin-tui"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arrow",
