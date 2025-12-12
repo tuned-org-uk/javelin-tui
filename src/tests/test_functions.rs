@@ -2,8 +2,8 @@ use crate::functions::{
     generate::cmd_generate, head::cmd_head, sample::cmd_sample, stats::cmd_stats, tui::run_tui,
 };
 
-use genegraph_storage::lance::LanceStorage;
-use genegraph_storage::traits::StorageBackend;
+use genegraph_storage::lance_storage_graph::LanceStorageGraph;
+use genegraph_storage::traits::backend::StorageBackend;
 use smartcore::linalg::basic::arrays::Array;
 use std::path::PathBuf;
 
@@ -115,7 +115,7 @@ async fn cmd_generate_creates_expected_artifacts() {
     out_dir.push("javelin_test");
     let uri = crate::datasets::path_to_uri(&out_dir);
 
-    let storage = LanceStorage::new(uri, "javelin_test".to_string());
+    let storage = LanceStorageGraph::new(uri, "javelin_test".to_string());
 
     // Metadata file must exist and be readable
     let md = storage

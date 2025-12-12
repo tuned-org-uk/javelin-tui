@@ -43,7 +43,8 @@ pub async fn run_tui(root: PathBuf) -> Result<()> {
 
     if entries.is_empty() {
         return Err(anyhow::anyhow!(format!(
-            "No .lance files found in directory {:?}",
+            "No .lance files found in directory {:?}. Tui command works with directories, \
+            for files use display command",
             root
         )));
     }

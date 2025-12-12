@@ -1,6 +1,6 @@
 [package]
 name = "javelin-tui"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 description = "Display and work with Lance matrices"
 license = "Apache-2.0"
@@ -17,13 +17,13 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 rand = "0.9.2"
 smartcore = {version = "^0.4.8"}
 sprs = "0.11.4"
-genegraph-storage = "0.1.2"
+genegraph-storage = "0.2.0"
 
 # TUI stack
 ratatui = { version = "0.30.0-beta.0", features = ["crossterm"] }
 crossterm = "0.29"
 
-# For logging, if you want nice CLI logs like genefold
+# For logging, if you want nice CLI logs
 log = { version = "0.4", features = ["release_max_level_off"] }
 env_logger = "0.11"
 rand_distr = "0.5.1"

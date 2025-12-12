@@ -1,15 +1,15 @@
+use crate::datasets::make_gaussian_cliques_multi;
+use genegraph_storage::lance_storage_graph::LanceStorageGraph;
+use genegraph_storage::metadata::GeneMetadata;
+use genegraph_storage::traits::backend::StorageBackend;
+use genegraph_storage::traits::metadata::Metadata;
 use log::{debug, info};
 use smartcore::linalg::basic::arrays::Array2;
+use smartcore::linalg::basic::matrix::DenseMatrix;
 use std::path::PathBuf;
 
 /// Generate a toy dataset to showcase
 pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::Result<()> {
-    use crate::datasets::make_gaussian_cliques_multi;
-    use genegraph_storage::lance::LanceStorage;
-    use genegraph_storage::metadata::GeneMetadata;
-    use genegraph_storage::traits::StorageBackend;
-    use smartcore::linalg::basic::matrix::DenseMatrix;
-
     // 1) Prepare storage directory and minimal metadata
     let name_id = "javelin_test";
     #[cfg(test)]
@@ -31,7 +31,7 @@ pub async fn cmd_generate(n_items: usize, n_dims: usize, seed: u64) -> anyhow::R
         std::fs::remove_dir_all(&out_dir).unwrap();
     }
 
-    let storage = LanceStorage::new(
+    let storage = LanceStorageGraph::new(
         out_dir.to_str().expect("non-UTF8 test path").to_string(),
         "javelin_test".to_string(),
     );
