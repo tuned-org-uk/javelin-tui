@@ -2683,9 +2683,9 @@ dependencies = [
 
 [[package]]
 name = "genegraph-storage"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd74ec7f5e3f5fbecee1c915a31e23b3297747b87e543354364257518c1c8ad6"
+checksum = "85dcad1b1546ac2c79a803475be25afbd31beef3222926cb5bf4558be639122c"
 dependencies = [
  "arrow",
  "arrow-array",
